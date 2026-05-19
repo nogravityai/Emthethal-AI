@@ -1,0 +1,300 @@
+/**
+ * Bottom Panel — Canonical Schema Preview
+ * 
+ * Displays the export from GET /api/cfis/v3/pipeline/export/{run_id}:
+ * {
+ *   canonical_document: { document_id, schema_version, sections: [...] },
+ *   formio_schema: { components: [{ title, components: [{ type, label, key, defaultValue }] }] }
+ * }
+ * 
+ * Also shows raw evidence snapshots and diff (before/after HITL).
+ */
+import React, { useState } from 'react';
+import { useWorkbenchStore } from '../store/workbenchStore.js';
+
+const C = {
+  bg: '#05080F', panel: '#0B1120', border: '#1A2438',
+  blue: '#3B82F6', green: '#10B981', red: '#EF4444',
+  yellow: '#F59E0B', purple: '#A78BFA', pink: '#EC4899',
+  text: '#E2E8F0', muted: '#64748B', accent: '#0EA5E9',
+};
+
+function JsonTree({ data, depth = 0 }) {
+  if (data === null || data === undefined) return <span style={{ color: C.muted }}>null</span>;
+  if (typeof data === 'boolean') return <span style={{ color: C.purple }}>{String(data)}</span>;
+  if (typeof data === 'number') return <span style={{ color: C.yellow, fontVariantNumeric: 'tabular-nums' }}>{data}</span>;
+  if (typeof data === 'string') return <span style={{ color: C.green }}>"{data}"</span>;
+  if (Array.isArray(data)) {
+    if (data.length === 0) return <span style={{ color: C.muted }}>[]</span>;
+    return (
+      <span>
+        [<br />
+        {data.slice(0, 5).map((item, i) => (
+          <span key={i}>
+            <span style={{ paddingLeft: (depth + 1) * 14 }} />
+            <JsonTree data={item} depth={depth + 1} />
+            {i < data.length - 1 ? ',' : ''}<br />
+          </span>
+        ))}
+        {data.length > 5 && <span style={{ paddingLeft: (depth + 1) * 14, color: C.muted }}>…+{data.length - 5} more<br /></span>}
+        <span style={{ paddingLeft: depth * 14 }}>]</span>
+      </span>
+    );
+  }
+  // Object
+  const keys = Object.keys(data);
+  return (
+    <span>
+      {'{'}<br />
+      {keys.slice(0, 20).map((k, i) => (
+        <span key={k}>
+          <span style={{ paddingLeft: (depth + 1) * 14 }}>
+            <span style={{ color: C.accent }}>"{k}"</span>
+            <span style={{ color: C.muted }}>: </span>
+            <JsonTree data={data[k]} depth={depth + 1} />
+            {i < keys.length - 1 ? ',' : ''}
+          </span><br />
+        </span>
+      ))}
+      {keys.length > 20 && <span style={{ paddingLeft: (depth + 1) * 14, color: C.muted }}>…+{keys.length - 20} more keys<br /></span>}
+      <span style={{ paddingLeft: depth * 14 }}>{'}'}</span>
+    </span>
+  );
+}
+
+function FormioPreview({ formioSchema }) {
+  if (!formioSchema?.components?.length) {
+    return <div style={{ color: C.muted, fontSize: 11, padding: 20, textAlign: 'center' }}>No Form.io schema available</div>;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {formioSchema.components.map((panel, pi) => (
+        <div key={pi} style={{ background: C.bg, borderRadius: 8, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
+          <div style={{ padding: '10px 14px', borderBottom: `1px solid ${C.border}`, background: `${C.blue}08` }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{panel.title ?? `Panel ${pi + 1}`}</span>
+          </div>
+          <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {panel.components?.map((comp, ci) => (
+              <div key={ci}>
+                <label style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 4 }}>
+                  {comp.label}
+                </label>
+                {comp.type === 'checkbox' ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{
+                      width: 16, height: 16, borderRadius: 4,
+                      border: `2px solid ${comp.defaultValue ? C.blue : C.border}`,
+                      background: comp.defaultValue ? C.blue : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    }}>
+                      {comp.defaultValue && <span style={{ color: 'white', fontSize: 10, fontWeight: 800 }}>✓</span>}
+                    </div>
+                    <span style={{ fontSize: 11, color: comp.defaultValue ? C.text : C.muted }}>
+                      {comp.defaultValue ? 'Checked' : 'Unchecked'}
+                    </span>
+                    {comp.defaultValue !== undefined && (
+                      <span style={{ fontSize: 8, marginLeft: 'auto', fontFamily: 'monospace', color: C.purple }}>
+                        provenance_ref: {comp.key}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{
+                    border: `1px solid ${comp.defaultValue ? C.border : C.border + '60'}`,
+                    borderRadius: 6, padding: '7px 12px',
+                    background: C.panel, fontSize: 13, minHeight: 36,
+                    color: comp.defaultValue ? C.text : C.muted,
+                    direction: 'rtl', display: 'flex', alignItems: 'center', gap: 8,
+                  }}>
+                    <span style={{ flex: 1 }}>{comp.defaultValue || <span style={{ opacity: 0.3 }}>—</span>}</span>
+                    {comp.defaultValue && (
+                      <span style={{ fontSize: 8, color: C.accent, fontFamily: 'monospace', direction: 'ltr' }}>
+                        {comp.key}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RawSnapshotView({ snapshots }) {
+  const [activeStage, setActiveStage] = useState('ocr');
+  const stageData = {
+    ocr:       snapshots.ocr,
+    geometry:  snapshots.geometry,
+    alignment: snapshots.alignment,
+    fusion:    snapshots.fusion,
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {Object.entries({ ocr: C.green, geometry: C.blue, alignment: C.pink, fusion: C.purple }).map(([k, color]) => (
+          <button
+            key={k}
+            id={`raw-stage-${k}`}
+            onClick={() => setActiveStage(k)}
+            style={{
+              padding: '4px 12px', borderRadius: 5, border: `1px solid ${activeStage === k ? color + '60' : C.border}`,
+              background: activeStage === k ? `${color}15` : 'transparent',
+              color: activeStage === k ? color : C.muted,
+              fontSize: 10, fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            {k}
+          </button>
+        ))}
+      </div>
+      <pre style={{
+        background: C.bg, borderRadius: 8, padding: 14,
+        border: `1px solid ${C.border}`, fontSize: 9,
+        fontFamily: 'monospace', color: C.text,
+        overflow: 'auto', maxHeight: 260, lineHeight: 1.6,
+      }}>
+        <JsonTree data={stageData[activeStage]} />
+      </pre>
+    </div>
+  );
+}
+
+const TABS = [
+  { key: 'json',   label: '📄 Canonical JSON' },
+  { key: 'formio', label: '📝 Form.io Preview' },
+  { key: 'raw',    label: '🔬 Raw Evidence' },
+  { key: 'diff',   label: '⚖ Before/After Diff' },
+];
+
+const PANEL_H = 280;
+
+export default function BottomPanel() {
+  const { activeTab, setActiveTab, schema, snapshots, runs } = useWorkbenchStore();
+
+  const hasPrev = runs.length > 1;
+
+  return (
+    <div style={{
+      height: PANEL_H, flexShrink: 0,
+      background: C.panel,
+      borderTop: `1px solid ${C.border}`,
+      display: 'flex', flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
+      {/* Tab bar */}
+      <div style={{ display: 'flex', borderBottom: `1px solid ${C.border}`, flexShrink: 0, overflowX: 'auto' }}>
+        {TABS.map(t => (
+          <button
+            key={t.key}
+            id={`bottom-tab-${t.key}`}
+            onClick={() => setActiveTab(t.key)}
+            style={{
+              padding: '8px 16px', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap',
+              background: 'transparent', border: 'none',
+              borderBottom: `2px solid ${activeTab === t.key ? C.blue : 'transparent'}`,
+              color: activeTab === t.key ? C.text : C.muted,
+              cursor: 'pointer', transition: 'all 0.15s',
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+        {schema && (
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingRight: 12, gap: 8 }}>
+            <span style={{ fontSize: 8, color: C.purple, fontFamily: 'monospace' }}>
+              v{schema.canonical_document?.schema_version}
+            </span>
+            <button
+              id="export-json-btn"
+              aria-label="Export JSON"
+              onClick={() => {
+                const blob = new Blob([JSON.stringify(schema, null, 2)], { type: 'application/json' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `cfis_export_${Date.now()}.json`;
+                a.click();
+              }}
+              style={{ fontSize: 10, padding: '4px 10px', borderRadius: 5, border: `1px solid ${C.border}`, background: C.bg, color: C.muted, cursor: 'pointer' }}
+            >
+              ↓ Export JSON
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Content */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
+
+        {/* ── CANONICAL JSON ─────────────────────────────────────────── */}
+        {activeTab === 'json' && (
+          schema ? (
+            <pre style={{ background: C.bg, borderRadius: 8, padding: 14, border: `1px solid ${C.border}`, fontSize: 9, fontFamily: 'monospace', color: C.text, overflow: 'auto', maxHeight: 200, lineHeight: 1.6 }}>
+              <JsonTree data={schema.canonical_document} />
+            </pre>
+          ) : (
+            <div style={{ color: C.muted, fontSize: 11, textAlign: 'center', padding: 28 }}>
+              Run the pipeline to see the Canonical Document schema
+            </div>
+          )
+        )}
+
+        {/* ── FORM.IO PREVIEW ────────────────────────────────────────── */}
+        {activeTab === 'formio' && (
+          schema ? (
+            <FormioPreview formioSchema={schema.formio_schema} />
+          ) : (
+            <div style={{ color: C.muted, fontSize: 11, textAlign: 'center', padding: 28 }}>
+              Run the pipeline to preview the Form.io output
+            </div>
+          )
+        )}
+
+        {/* ── RAW EVIDENCE ───────────────────────────────────────────── */}
+        {activeTab === 'raw' && (
+          snapshots.ocr ? (
+            <RawSnapshotView snapshots={snapshots} />
+          ) : (
+            <div style={{ color: C.muted, fontSize: 11, textAlign: 'center', padding: 28 }}>
+              Run the pipeline to inspect raw evidence snapshots
+            </div>
+          )
+        )}
+
+        {/* ── DIFF VIEW ──────────────────────────────────────────────── */}
+        {activeTab === 'diff' && (
+          <div>
+            {hasPrev ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
+                    Previous Run · {runs[1]?.run_id?.slice(0, 12)}…
+                  </div>
+                  <pre style={{ background: C.bg, borderRadius: 7, padding: 10, border: `1px solid ${C.border}`, fontSize: 8, fontFamily: 'monospace', color: C.text, overflow: 'auto', maxHeight: 180, lineHeight: 1.5 }}>
+                    {`Fields: ${runs[1]?.stages?.length ?? '?'} stages\nDeterministic: ${runs[1]?.determinism_ok}`}
+                  </pre>
+                </div>
+                <div>
+                  <div style={{ fontSize: 9, color: C.blue, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
+                    Current Run · {runs[0]?.run_id?.slice(0, 12)}…{runs[0]?.is_hitl_rerun ? ' (HITL)' : ''}
+                  </div>
+                  <pre style={{ background: C.bg, borderRadius: 7, padding: 10, border: `1px solid ${C.blue}30`, fontSize: 8, fontFamily: 'monospace', color: C.text, overflow: 'auto', maxHeight: 180, lineHeight: 1.5 }}>
+                    {`Fields: ${runs[0]?.stages?.length ?? '?'} stages\nDeterministic: ${runs[0]?.determinism_ok}`}
+                  </pre>
+                </div>
+              </div>
+            ) : (
+              <div style={{ color: C.muted, fontSize: 11, textAlign: 'center', padding: 28 }}>
+                Run the pipeline at least twice (or perform a HITL operation) to see the diff
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

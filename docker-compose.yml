@@ -1,0 +1,171 @@
+version: "3.9"
+
+# CFIS v3 docker-compose
+# Merges existing services (db, redis, ollama, minio, avni, rq-worker)
+# with new CFIS services (model_init, cfis_api).
+# The original "backend" service is preserved for backward compat.
+
+volumes:
+  paddle_models:      # Arabic OCR models — survives rebuilds
+  postgres_data:
+  redis_data:
+  minio_data:
+
+services:
+  # ── CFIS API (Phase 1 — replaces legacy backend in Phase 2) ─────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: "1"
+    container_name: cfis_api
+    volumes:
+      - paddle_models:/root/.paddleocr
+      - ./backend:/app
+    environment:
+      - PADDLE_MODEL_DIR=/root/.paddleocr
+      - CUDA_VISIBLE_DEVICES=-1
+      - DATABASE_URL=${DATABASE_URL:-postgresql://cfis:cfis@db:5432/cfis}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - CONFIDENCE_AUTO_PASS=0.90
+      - CONFIDENCE_QA_REVIEW=0.70
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=emthethal
+      - MINIO_SECRET_KEY=emthethal_secret_2026
+      - MINIO_BUCKET=emthethal-originals
+      - STORAGE_BACKEND=minio
+    depends_on:
+      db:
+        condition: service_healthy
+      model_init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    ports:
+      - "8001:8000"   # CFIS API on 8001 to avoid conflict with legacy backend on 8000
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  # ── Model Init (one-time Arabic OCR download) ──────────────────────────────
+  model_init:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cfis_model_init
+    command: >
+      python3 -c "
+      import os, sys
+      os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+      os.makedirs('/root/.paddleocr', exist_ok=True)
+      marker = '/root/.paddleocr/.arabic_model_ready'
+      if os.path.exists(marker):
+          print('Arabic model already downloaded. Skipping.')
+          sys.exit(0)
+      print('Downloading Arabic OCR model (one-time only)...')
+      from paddleocr import PaddleOCR
+      PaddleOCR(use_angle_cls=True, lang='arabic', use_gpu=False, show_log=False)
+      open(marker, 'w').write('ready')
+      print('Arabic model ready.')
+      "
+    volumes:
+      - paddle_models:/root/.paddleocr
+    environment:
+      - CUDA_VISIBLE_DEVICES=-1
+    restart: "no"
+
+  # ── PostgreSQL (shared with legacy backend) ──────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: emthethal_db
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: emthethal_ai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: emthethal_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  # ── MinIO Object Storage ─────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: emthethal_minio
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: emthethal
+      MINIO_ROOT_PASSWORD: emthethal_secret_2026
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  # ── Legacy Backend (Emthethal AI v2 — preserved) ────────────────────────────
+  backend:
+    build:
+      context: ./backend
+    container_name: emthethal_backend
+    restart: always
+    depends_on:
+      - db
+      - redis
+      - minio
+    environment:
+      DATABASE_URL: postgresql+asyncpg://user:password@db:5432/emthethal_ai
+      REDIS_URL: redis://redis:6379/0
+      CONFIDENCE_AUTO_PASS: "0.90"
+      CONFIDENCE_QA_REVIEW: "0.70"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: emthethal
+      MINIO_SECRET_KEY: emthethal_secret_2026
+      MINIO_BUCKET: emthethal-originals
+      STORAGE_BACKEND: minio
+      CUDA_VISIBLE_DEVICES: "-1"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - paddle_models:/root/.paddleocr
+
+  # ── RQ Worker (Legacy) ───────────────────────────────────────────────────────
+  rq-worker:
+    build:
+      context: ./backend
+    container_name: emthethal_rq_worker
+    restart: always
+    depends_on:
+      - db
+      - redis
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/emthethal_ai
+      REDIS_URL: redis://redis:6379/0
+      CONFIDENCE_AUTO_PASS: "0.90"
+      CONFIDENCE_QA_REVIEW: "0.70"
+      CUDA_VISIBLE_DEVICES: "-1"
+    volumes:
+      - ./backend:/app
+      - paddle_models:/root/.paddleocr
+    command: rq worker emthethal-ingestion emthethal-analytics --url redis://redis:6379/0
+
