@@ -140,7 +140,7 @@ def _get_ocr_engine(language: str = "arabic") -> object:
             det_db_score_mode="slow",   # better for dense Arabic text
         )
         # Arabic is default; only use English model if explicitly forced
-        cfg["lang"] = "arabic" if language in ("ar", "arabic", "ar_en", "mixed") else "en"
+        cfg["lang"] = "ar" if language in ("ar", "arabic", "ar_en", "mixed") else "en"
         logger.info(f"Loading OCR engine: lang={cfg['lang']}")
         return PaddleOCR(**cfg)
     except ImportError:
@@ -195,6 +195,15 @@ def _extract_native_tokens(
     if total_chars < NATIVE_TEXT_MIN_CHARS:
         logger.info(
             f"Page {page_number}: native text too sparse ({total_chars} chars) → OCR fallback"
+        )
+        return [], False
+        
+    # Check if native text contains PUA characters (visually encoded / protected PDF)
+    # Range \uE000 to \uF8FF covers the Private Use Area
+    has_pua = any(any(0xE000 <= ord(ch) <= 0xF8FF for ch in w.get("text", "")) for w in words)
+    if has_pua:
+        logger.info(
+            f"Page {page_number}: PUA characters detected in native text layer (protected PDF) → forcing OCR fallback to ensure clean, standard Arabic text extraction"
         )
         return [], False
 
@@ -293,6 +302,8 @@ def _ocr_single_page(
 
             try:
                 text = str(text_conf[0]).strip()
+                if language in ("ar", "arabic"):
+                    text = _fix_arabic_text(text, is_reversed=True)
                 confidence = float(text_conf[1]) if len(text_conf) > 1 else 0.5
             except (IndexError, TypeError, ValueError):
                 continue

@@ -5,22 +5,51 @@ import { immer } from 'zustand/middleware/immer';
 const defaultLayers = {
   ocr:       true,
   geometry:  true,
+  coordinate_space: true,
+  shapes:    true,
+  topology:  true,
   alignment: false,
   conflict:  false,
   orphan:    false,
   hitl:      false,
   fusion:    true,
+  minimap:   true,
+  coord_tooltip: true,
+};
+
+const defaultOpacities = {
+  ocr:       0.85,
+  geometry:  0.85,
+  coordinate_space: 0.25,
+  shapes:    0.7,
+  topology:  0.4,
+  alignment: 0.6,
+  conflict:  0.8,
+  orphan:    0.7,
+  hitl:      0.7,
+  fusion:    0.9,
+  minimap:   1.0,
+  coord_tooltip: 1.0,
+};
+
+const defaultRenderModes = {
+  shapes: 'contour', // 'contour' | 'centroid' | 'saliency'
+  coordinate_space: 'grid_axis', // 'grid_axis' | 'grid_only' | 'axis_only'
+  alignment: 'semantic', // 'semantic' | 'gradient'
 };
 
 // Layer visual config — matches backend AlignmentType values + stage names
 export const LAYER_META = {
-  ocr:       { label: 'OCR Tokens',        color: '#10B981', shortcut: '1', stageKey: 'ocr_evidence' },
-  geometry:  { label: 'Geometry Regions',  color: '#3B82F6', shortcut: '2', stageKey: 'geometry_evidence' },
-  alignment: { label: 'Alignment Edges',   color: '#EC4899', shortcut: '3', stageKey: 'alignment_evidence' },
-  conflict:  { label: 'Conflict Edges',    color: '#EF4444', shortcut: '4', stageKey: 'alignment_evidence' },
-  orphan:    { label: 'Orphan Tokens',     color: '#F97316', shortcut: '5', stageKey: 'alignment_evidence' },
-  hitl:      { label: 'HITL Operations',   color: '#A78BFA', shortcut: '6', stageKey: 'patched_evidence' },
-  fusion:    { label: 'Resolved Fields',   color: '#8B5CF6', shortcut: '7', stageKey: 'resolved_fields' },
+  ocr:              { label: 'OCR Tokens',        color: '#10B981', shortcut: '1', stageKey: 'ocr_evidence' },
+  geometry:         { label: 'Geometry Regions',  color: '#3B82F6', shortcut: '2', stageKey: 'geometry_evidence' },
+  coordinate_space: { label: 'Coordinate Spaces', color: '#06B6D4', shortcut: '3', stageKey: 'coordinate_space_evidence' },
+  shapes:           { label: 'Primitive Contours',color: '#F59E0B', shortcut: '4', stageKey: 'shape_evidence' },
+  topology:         { label: 'Table Topology',    color: '#FBBF24', shortcut: '5', stageKey: 'topology_evidence' },
+  alignment:        { label: 'Alignment Edges',   color: '#EC4899', shortcut: '6', stageKey: 'alignment_evidence' },
+  conflict:         { label: 'Conflict Edges',    color: '#EF4444', shortcut: '7', stageKey: 'alignment_evidence' },
+  orphan:           { label: 'Orphan Tokens',     color: '#F97316', shortcut: '8', stageKey: 'alignment_evidence' },
+  hitl:             { label: 'HITL Operations',   color: '#A78BFA', shortcut: '9', stageKey: 'patched_evidence' },
+  fusion:           { label: 'Resolved Fields',   color: '#8B5CF6', shortcut: '0', stageKey: 'resolved_fields' },
 };
 
 // Backend AlignmentType enum values (from alignment/models.py)
@@ -29,14 +58,21 @@ export const ALIGNMENT_TYPES = {
   TOKEN_CROSSES_BOUNDARY: 'token_crosses_boundary',
   TOKEN_TOUCHING_REGION:  'token_touching_region',
 };
+export const IR_STAGE_LAYERS = {
+  raw_geometry:     ['shapes', 'geometry'],
+  structural:       ['shapes', 'geometry', 'topology'],
+  coordinate:       ['coordinate_space', 'shapes'],
+  cognitive:        ['ocr', 'geometry', 'alignment', 'fusion'],
+  reasoning:        ['fusion', 'topology'],
+};
 
 // Backend HITL stage names (from orchestration.py pipeline stages)
 export const PIPELINE_STAGES = [
   { name: 'raw_ocr_input',     type: 'raw_ocr_dicts',       label: 'OCR Input' },
   { name: 'raw_cv2_data',      type: 'raw_cv2_dicts',        label: 'CV2 Geometry' },
-  { name: 'ocr_adapter',       type: 'ocr_evidence',         label: 'OCR Adapter' },
-  { name: 'geometry',          type: 'geometry_evidence',    label: 'Geometry Adapter' },
+  { name: 'perception',        type: 'perception_data',      label: 'Perception Stage (3-Layer)' },
   { name: 'evidence_patching', type: 'patched_evidence',     label: 'Evidence Patch (HITL)' },
+  { name: 'topology_reconstruction', type: 'topology_evidence', label: 'Topology Reconstruction' },
   { name: 'alignment',         type: 'alignment_evidence',   label: 'Alignment Engine' },
   { name: 'alignment_fusion',  type: 'resolved_fields',      label: 'Fusion Engine' },
 ];
@@ -52,12 +88,14 @@ export const useWorkbenchStore = create(
     artifacts: {},    // { artifact_type → artifact_id } from PipelineRunResponse
 
     // ── Snapshots (keyed by stage) ────────────────────────────────────────────
-    // Each snapshot shape matches the backend debug response exactly:
     //   ocr:       { tokens: [{id, text, confidence, bbox}] }
     //   geometry:  { regions: [{id, bbox, confidence}] }
+    //   topology:  { tables: [], hierarchy: [], linked_checkboxes: {} }
     //   alignment: { alignments: [{id, type, score, token, region}] }
     //   fusion:    { fields: [{id, field_type, confidence, ocr_tokens, alignment_edges}] }
-    snapshots: { ocr: null, geometry: null, alignment: null, fusion: null },
+    //   coordinate_space: { coordinate_space: {...} }
+    //   shapes:    { shapes: [...] }
+    snapshots: { ocr: null, geometry: null, topology: null, alignment: null, fusion: null, coordinate_space: null, shapes: null },
 
     // ── Run history ───────────────────────────────────────────────────────────
     runs: [],           // Array of { run_id, timestamp, stages[], human_operations[], determinism_ok }
@@ -89,14 +127,35 @@ export const useWorkbenchStore = create(
 
     // ── UI state ──────────────────────────────────────────────────────────────
     layers: { ...defaultLayers },
+    layerOpacities: { ...defaultOpacities },
+    layerRenderModes: { ...defaultRenderModes },
+    irLevel: 'cognitive',
     selected: null,     // { type: 'token'|'region'|'alignment'|'field', data: {...} }
     loading: false,
     status: '',
     activeTab: 'json',  // bottom panel: 'json' | 'formio' | 'raw' | 'diff'
+    
+    // ── Spatial IDE additions ──
+    workspaceMode: 'debug', // 'debug' | 'inspect' | 'replay' | 'chart'
+    isBottomCollapsed: false,
+    isLeftCollapsed: false,
+    isRightCollapsed: false,
 
     // =========================================================================
     //  Actions
     // =========================================================================
+
+    setWorkspaceMode: (mode) =>
+      set(s => { s.workspaceMode = mode; }),
+
+    setBottomCollapsed: (collapsed) =>
+      set(s => { s.isBottomCollapsed = collapsed; }),
+
+    setLeftCollapsed: (collapsed) =>
+      set(s => { s.isLeftCollapsed = collapsed; }),
+
+    setRightCollapsed: (collapsed) =>
+      set(s => { s.isRightCollapsed = collapsed; }),
 
     setLoading: (loading, status = '') =>
       set(s => { s.loading = loading; s.status = status; }),
@@ -109,7 +168,7 @@ export const useWorkbenchStore = create(
       set(s => {
         s.runId = run_id;
         s.artifacts = artifacts ?? {};
-        s.snapshots = snapshots ?? { ocr: null, geometry: null, alignment: null, fusion: null };
+        s.snapshots = snapshots ?? { ocr: null, geometry: null, topology: null, alignment: null, fusion: null, coordinate_space: null, shapes: null };
         s.timeline = timeline;
         s.schema = schema;
         s.determinismOk = determinism_ok;
@@ -162,6 +221,23 @@ export const useWorkbenchStore = create(
     setLayerVisible: (key, visible) =>
       set(s => { s.layers[key] = visible; }),
 
+    setLayerOpacity: (key, val) =>
+      set(s => { s.layerOpacities[key] = Math.max(0, Math.min(1, val)); }),
+
+    setLayerRenderMode: (key, mode) =>
+      set(s => { s.layerRenderModes[key] = mode; }),
+
+    setIrLevel: (level) =>
+      set(s => {
+        s.irLevel = level;
+        const active = IR_STAGE_LAYERS[level];
+        if (active) {
+          Object.keys(s.layers).forEach(k => {
+            s.layers[k] = active.includes(k);
+          });
+        }
+      }),
+
     setZoom: (zoom) =>
       set(s => { s.zoom = Math.max(0.2, Math.min(5, zoom)); }),
 
@@ -195,13 +271,21 @@ export const useWorkbenchStore = create(
     resetWorkbench: () =>
       set(s => {
         s.runId = null; s.artifacts = {}; s.runs = []; s.activeRunIndex = 0;
-        s.snapshots = { ocr: null, geometry: null, alignment: null, fusion: null };
-        s.compareSnapshots = { ocr: null, geometry: null, alignment: null, fusion: null };
+        s.snapshots = { ocr: null, geometry: null, topology: null, alignment: null, fusion: null, coordinate_space: null, shapes: null };
+        s.compareSnapshots = { ocr: null, geometry: null, topology: null, alignment: null, fusion: null, coordinate_space: null, shapes: null };
         s.timeline = null; s.schema = null; s.selected = null;
         s.loading = false; s.status = ''; s.compareMode = false; s.compareRunId = null;
-        s.layers = { ...defaultLayers }; s.zoom = 1; s.panOffset = { x: 0, y: 0 };
+        s.layers = { ...defaultLayers };
+        s.layerOpacities = { ...defaultOpacities };
+        s.layerRenderModes = { ...defaultRenderModes };
+        s.irLevel = 'cognitive';
+        s.zoom = 1; s.panOffset = { x: 0, y: 0 };
         s.pageImage = null; s.pageW = 1000; s.pageH = 1000;
         s.hitlLedger = []; s.determinismOk = true;
+        s.workspaceMode = 'debug';
+        s.isBottomCollapsed = false;
+        s.isLeftCollapsed = false;
+        s.isRightCollapsed = false;
       }),
   }))
 );

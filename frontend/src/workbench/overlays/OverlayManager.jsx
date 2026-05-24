@@ -85,11 +85,64 @@ export default function OverlayManager({ snapshots, visibleLayers, onEvidenceCli
         );
     };
 
+    const renderTopology = () => {
+        if (!visibleLayers.topology || !snapshots.topology || !snapshots.topology.tables) return null;
+        return snapshots.topology.tables.map(table => {
+            const [tx1, ty1, tx2, ty2] = table.bbox;
+            return (
+                <React.Fragment key={table.table_id}>
+                    {/* Table Border */}
+                    <div 
+                        onClick={() => onEvidenceClick('table', table)}
+                        className="absolute border-2 border-dashed border-yellow-500 bg-yellow-500 bg-opacity-5 pointer-events-auto cursor-pointer hover:bg-opacity-10 transition-colors"
+                        style={{
+                            left: tx1,
+                            top: ty1,
+                            width: tx2 - tx1,
+                            height: ty2 - ty1,
+                            zIndex: 10
+                        }}
+                        title={`Table: ${table.table_id}\nRows: ${table.rows_count}, Cols: ${table.cols_count}`}
+                    >
+                        {/* Table Badge */}
+                        <div className="absolute -top-6 left-0 bg-yellow-500 text-black text-xs font-bold px-1.5 py-0.5 rounded shadow flex items-center gap-1 z-20">
+                            <span>📊</span>
+                            <span>{table.table_id} ({table.rows_count}x{table.cols_count})</span>
+                        </div>
+                    </div>
+                    {/* Render Cells */}
+                    {table.cells.map(cell => {
+                        const [cx1, cy1, cx2, cy2] = cell.bbox;
+                        return (
+                            <div 
+                                key={cell.cell_id}
+                                onClick={() => onEvidenceClick('cell', cell)}
+                                className="absolute border border-yellow-400 bg-yellow-400 bg-opacity-10 hover:bg-opacity-20 cursor-pointer pointer-events-auto transition-colors z-11 flex items-center justify-center"
+                                style={{
+                                    left: cx1,
+                                    top: cy1,
+                                    width: cx2 - cx1,
+                                    height: cy2 - cy1
+                                }}
+                                title={`Cell ID: ${cell.cell_id}\nRow: ${cell.row_index}, Col: ${cell.column_index}`}
+                            >
+                                <span className="text-yellow-600 font-semibold text-[8px] opacity-75">
+                                    R{cell.row_index} C{cell.column_index}
+                                </span>
+                            </div>
+                        );
+                    })}
+                </React.Fragment>
+            );
+        });
+    };
+
     return (
         <>
             {renderRegions()}
             {renderTokens()}
             {renderAlignments()}
+            {renderTopology()}
         </>
     );
 }

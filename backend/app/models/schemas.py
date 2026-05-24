@@ -158,6 +158,13 @@ class CanonicalToken(BaseModel):
     angle_corrected: bool = False
     extraction_language: str = "native"
 
+    # Semantic/Topology properties
+    logical_row_id: Optional[str] = None
+    logical_col_id: Optional[str] = None
+    logical_cell_id: Optional[str] = None
+    table_id: Optional[str] = None
+
+
 
 # ══════════════════════════════════════════════════════════════
 # LAYER 1.5: LAYOUT PROPOSAL
@@ -198,8 +205,40 @@ class LayoutCell(BaseModel):
     avg_confidence: float = Field(ge=0.0, le=1.0)
     source: ExtractionSource = ExtractionSource.OCR
 
+class TableTopologyEvidence(BaseModel):
+    """
+    Logical grid coordinates for a cell in a table.
+    Resolved during topology reconstruction.
+    """
+    stable_id: str
+    page_number: int = Field(ge=0)
+    table_id: str
+    row_index: int = Field(ge=0)
+    column_index: int = Field(ge=0)
+    rowspan: int = Field(ge=1, default=1)
+    colspan: int = Field(ge=1, default=1)
+    cell_id: str
+    bbox: BoundingBox
+    coordinate_space: CoordinateSpace = CoordinateSpace.PAGE_PIXELS
+
+
+class RegionHierarchyEvidence(BaseModel):
+    """
+    Hierarchical structural relationships of document layout.
+    page -> section -> table -> row -> cell
+    """
+    stable_id: str
+    page_number: int = Field(ge=0)
+    element_id: str
+    element_type: str  # 'page', 'section', 'table', 'row', 'cell'
+    parent_id: Optional[str] = None
+    children_ids: List[str] = Field(default_factory=list)
+    bbox: BoundingBox
+    coordinate_space: CoordinateSpace = CoordinateSpace.PAGE_PIXELS
+
 
 # ══════════════════════════════════════════════════════════════
+
 # LAYER 3: FORM FIELD (Semantic IR)
 #
 # bbox MUST be NORMALIZED (0–1) — enforced by validator.

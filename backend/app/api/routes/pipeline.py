@@ -23,9 +23,9 @@ from app.services.pipeline.orchestration import PipelineOrchestrator
 from app.services.pipeline.artifact_store import ArtifactStore
 
 # Stage imports — only Adapters + logical stages, no raw CV/OCR
-from app.services.ocr_adapter.adapter import OCRAdapterStage
-from app.services.geometry_adapter.adapter import GeometryAdapterStage
+from app.services.pipeline.perception_stage import PerceptionStage
 from app.services.hitl.evidence_patcher import EvidencePatchStage
+from app.services.topology.stage import TopologyStage
 from app.services.alignment.engine import AlignmentStage
 from app.services.fusion.fusion_engine import AlignmentFusionStage
 from app.services.pipeline.pipeline_models import PipelineArtifact
@@ -133,9 +133,9 @@ async def run_pipeline(req: PipelineRunRequest):
 
     orch.add_stage(_FixtureOCRStage(req.fixture_ocr))
     orch.add_stage(_FixtureGeomStage(req.fixture_geometry))
-    orch.add_stage(OCRAdapterStage())
-    orch.add_stage(GeometryAdapterStage())
+    orch.add_stage(PerceptionStage())
     orch.add_stage(EvidencePatchStage())
+    orch.add_stage(TopologyStage())
     orch.add_stage(AlignmentStage())
     orch.add_stage(AlignmentFusionStage())
 
@@ -169,11 +169,13 @@ async def replay_pipeline(req: ReplayRequest):
     orig_resolved = ctx.artifact_references.get("resolved_fields")
 
     # Clear downstream references to allow rerun
-    stages_to_clear = ["alignment_evidence", "resolved_fields"]
+    stages_to_clear = ["topology_evidence", "alignment_evidence", "resolved_fields"]
     if req.from_stage == "alignment":
         stages_to_clear = ["alignment_evidence", "resolved_fields"]
     elif req.from_stage == "alignment_fusion":
         stages_to_clear = ["resolved_fields"]
+    elif req.from_stage == "topology_reconstruction":
+        stages_to_clear = ["topology_evidence", "alignment_evidence", "resolved_fields"]
 
     for s in stages_to_clear:
         ctx.artifact_references.pop(s, None)
@@ -313,6 +315,9 @@ async def get_debug_snapshot(run_id: str, stage: str):
     stage_map = {
         "ocr":        "ocr_evidence",
         "geometry":   "geometry_evidence",
+        "coordinate_space": "coordinate_space_evidence",
+        "shapes":     "shape_evidence",
+        "topology":   "topology_evidence",
         "alignment":  "alignment_evidence",
         "fusion":     "resolved_fields",
     }
@@ -355,6 +360,20 @@ async def get_debug_snapshot(run_id: str, stage: str):
              "confidence": r.geometry_confidence}
             for r in payload.get("regions", [])
         ]
+    elif artifact_type == "coordinate_space_evidence":
+        snapshot["coordinate_space"] = payload
+    elif artifact_type == "shape_evidence":
+        snapshot["shape_count"] = len(payload)
+        snapshot["shapes"] = [
+            {
+                "hu_moments": s.hu_moments,
+                "area": s.area,
+                "perimeter": s.perimeter,
+                "aspect_ratio": s.aspect_ratio,
+                "centroid": s.centroid
+            }
+            for s in payload
+        ]
     elif artifact_type == "alignment_evidence":
         snapshot["alignment_count"] = len(payload)
         snapshot["alignments"] = [
@@ -363,6 +382,58 @@ async def get_debug_snapshot(run_id: str, stage: str):
              "region": a.target_evidence_id}
             for a in payload
         ]
+    elif artifact_type == "topology_evidence":
+        # Group cells by table_id to form table objects
+        tables_by_id = {}
+        for cell in payload.table_topologies:
+            if cell.table_id not in tables_by_id:
+                tables_by_id[cell.table_id] = []
+            tables_by_id[cell.table_id].append(cell)
+
+        tables_list = []
+        for table_id, cells in tables_by_id.items():
+            tx1 = min(c.bbox.x1 for c in cells)
+            ty1 = min(c.bbox.y1 for c in cells)
+            tx2 = max(c.bbox.x2 for c in cells)
+            ty2 = max(c.bbox.y2 for c in cells)
+            
+            r_count = max(c.row_index + c.rowspan for c in cells)
+            c_count = max(c.column_index + c.colspan for c in cells)
+
+            tables_list.append({
+                "table_id": table_id,
+                "bbox": [tx1, ty1, tx2, ty2],
+                "rows_count": r_count,
+                "cols_count": c_count,
+                "cells": [
+                    {
+                        "cell_id": c.cell_id,
+                        "bbox": [c.bbox.x1, c.bbox.y1, c.bbox.x2, c.bbox.y2],
+                        "row_index": c.row_index,
+                        "column_index": c.column_index,
+                        "rowspan": c.rowspan,
+                        "colspan": c.colspan
+                    }
+                    for c in cells
+                ]
+            })
+
+        snapshot["table_count"] = len(tables_list)
+        snapshot["hierarchy_count"] = len(payload.region_hierarchy)
+        snapshot["linked_checkboxes_count"] = len(payload.linked_checkboxes)
+        snapshot["tables"] = tables_list
+        snapshot["hierarchy"] = [
+            {
+                "stable_id": h.stable_id,
+                "element_id": h.element_id,
+                "element_type": h.element_type,
+                "parent_id": h.parent_id,
+                "children_ids": h.children_ids,
+                "bbox": [h.bbox.x1, h.bbox.y1, h.bbox.x2, h.bbox.y2]
+            }
+            for h in payload.region_hierarchy
+        ]
+        snapshot["linked_checkboxes"] = payload.linked_checkboxes
     elif artifact_type == "resolved_fields":
         snapshot["field_count"] = len(payload)
         snapshot["fields"] = [

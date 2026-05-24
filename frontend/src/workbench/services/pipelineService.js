@@ -43,19 +43,25 @@ export const pipelineService = {
     return data;
   },
 
-  /** Fetch all 4 snapshots in parallel */
+  /** Fetch all 7 snapshots in parallel */
   getAllSnapshots: async (run_id) => {
-    const [ocr, geometry, alignment, fusion] = await Promise.allSettled([
+    const [ocr, geometry, topology, alignment, fusion, coordinate_space, shapes] = await Promise.allSettled([
       pipelineService.getSnapshot(run_id, 'ocr'),
       pipelineService.getSnapshot(run_id, 'geometry'),
+      pipelineService.getSnapshot(run_id, 'topology'),
       pipelineService.getSnapshot(run_id, 'alignment'),
       pipelineService.getSnapshot(run_id, 'fusion'),
+      pipelineService.getSnapshot(run_id, 'coordinate_space'),
+      pipelineService.getSnapshot(run_id, 'shapes'),
     ]);
     return {
       ocr: ocr.status === 'fulfilled' ? ocr.value : null,
       geometry: geometry.status === 'fulfilled' ? geometry.value : null,
+      topology: topology.status === 'fulfilled' ? topology.value : null,
       alignment: alignment.status === 'fulfilled' ? alignment.value : null,
       fusion: fusion.status === 'fulfilled' ? fusion.value : null,
+      coordinate_space: coordinate_space.status === 'fulfilled' ? coordinate_space.value : null,
+      shapes: shapes.status === 'fulfilled' ? shapes.value : null,
     };
   },
 
@@ -190,7 +196,7 @@ export async function runFixturePipeline(fixturePayload) {
     run_id,
     artifacts: runResult.artifacts,
     snapshots: snapshots.status === 'fulfilled' ? snapshots.value
-      : { ocr: null, geometry: null, alignment: null, fusion: null },
+      : { ocr: null, geometry: null, topology: null, alignment: null, fusion: null, coordinate_space: null, shapes: null },
     timeline: timeline.status === 'fulfilled' ? timeline.value : null,
     schema: schema.status === 'fulfilled' ? schema.value : null,
   };

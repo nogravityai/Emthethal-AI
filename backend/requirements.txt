@@ -30,7 +30,7 @@ docx2txt
 
 # ─── OCR Engines ─────────────────────────────────────────────────────────────
 paddlepaddle==2.6.2
-paddleocr>=2.7.0
+paddleocr==2.7.3
 
 # ─── Layout Analysis ─────────────────────────────────────────────────────────
 # pp-structurev3 is part of paddleocr>=2.7.0 — no separate install needed

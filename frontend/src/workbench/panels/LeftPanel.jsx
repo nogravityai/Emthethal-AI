@@ -1,24 +1,12 @@
 /**
- * Left Panel — Evidence Inspector + HITL Operations
+ * Left Panel — Stages, Engines, Artifacts, and Replay Timeline
  * 
- * Maps exactly to Phase 3 backend models:
- * - OcrToken:      { id (stable_id), text, confidence, bbox }
- * - GeometryRegion: { id (stable_id), bbox, confidence }
- * - AlignmentEdge: { id, type (AlignmentType enum), score, token, region }
- * - FusionField:   { id (field_id), field_type, confidence, ocr_tokens[], alignment_edges[] }
- *                    + confidence_breakdown: { geometry_score, assignment_score, text_score,
- *                                             anchor_penalty, conflict_penalty, human_override_score }
- * 
- * HITL operations map to backend hitl/models.py:
- * - line_rejection, line_approval
- * - region_merge, region_split  
- * - token_reassignment
- * - checkbox_correction
+ * Maps exactly to Phase 3/4 pipeline orchestration details.
  */
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useWorkbenchStore, LAYER_META } from '../store/workbenchStore.js';
-import { HITL_OP_TYPES } from '../services/pipelineService.js';
+import { motion } from 'framer-motion';
+import { useWorkbenchStore, PIPELINE_STAGES, LAYER_META } from '../store/workbenchStore.js';
+import { pipelineService } from '../services/pipelineService.js';
 
 const C = {
   bg: '#05080F', panel: '#0B1120', border: '#1A2438',
@@ -27,89 +15,166 @@ const C = {
   orange: '#F97316', text: '#E2E8F0', muted: '#64748B', accent: '#0EA5E9',
 };
 
-// Confidence formula from backend: fusion/models.py ConfidenceBreakdown.final_score
-function computeFinalScore(cb) {
-  if (!cb) return 0;
-  const base = (cb.geometry_score ?? 0) * 0.4 + (cb.assignment_score ?? 0) * 0.4 + (cb.text_score ?? 0) * 0.2;
-  const penalty = (cb.anchor_penalty ?? 0) + (cb.conflict_penalty ?? 0);
-  return Math.max(0, Math.min(1, base - penalty + (cb.human_override_score ?? 0)));
-}
+const STAGE_COLORS = {
+  'raw_ocr_input':     C.muted,
+  'raw_cv2_data':      C.muted,
+  'ocr_adapter':       C.green,
+  'geometry':          C.blue,
+  'evidence_patching': C.purple,
+  'alignment':         C.pink,
+  'alignment_fusion':  C.yellow,
+};
 
-function ConfBar({ label, value, color, tooltip }) {
+// Pipeline engines metadata
+const PIPELINE_ENGINES = [
+  {
+    name: 'OCRAdapterEngine',
+    desc: 'Ingests raw OCR and outputs normalized token evidence (OCRTokenEvidence).',
+    inputs: ['raw_ocr_dicts'],
+    outputs: ['ocr_evidence']
+  },
+  {
+    name: 'GeometryAdapterEngine',
+    desc: 'Maps raw CV2 boxes/lines into DetectedBoxEvidence and DetectedLineEvidence.',
+    inputs: ['raw_cv2_dicts'],
+    outputs: ['geometry_evidence']
+  },
+  {
+    name: 'CoordinateSpaceDetectorEngine',
+    desc: 'Detects scale, page boundaries, and DPI scaling adjustments.',
+    inputs: ['raw_ocr_dicts', 'raw_cv2_dicts'],
+    outputs: ['coordinate_space_evidence']
+  },
+  {
+    name: 'PrimitiveShapeEngine',
+    desc: 'Extracts shape contours, centroids, and invariant Hu moments descriptor.',
+    inputs: ['geometry_evidence'],
+    outputs: ['shape_evidence']
+  },
+  {
+    name: 'TopologyStage',
+    desc: 'Extracts hierarchical tables, layout trees, and linked checkboxes.',
+    inputs: ['geometry_evidence', 'ocr_evidence'],
+    outputs: ['topology_evidence']
+  },
+  {
+    name: 'AlignmentStage',
+    desc: 'Matches text tokens to geometry regions using spatial intersection score.',
+    inputs: ['ocr_evidence', 'geometry_evidence'],
+    outputs: ['alignment_evidence']
+  },
+  {
+    name: 'FusionStage',
+    desc: 'Applies evidence fusion with confidence scoring and conflict resolution.',
+    inputs: ['alignment_evidence', 'topology_evidence'],
+    outputs: ['resolved_fields']
+  }
+];
+
+function ArtifactBadge({ artifactId }) {
+  const [inspecting, setInspecting] = useState(false);
+  const [meta, setMeta] = useState(null);
+
+  const inspect = async () => {
+    if (!artifactId || inspecting) return;
+    setInspecting(true);
+    try {
+      const data = await pipelineService.inspectArtifact(artifactId);
+      setMeta(data);
+    } catch (_) {
+      setMeta({ error: 'Artifact metadata unavailable' });
+    }
+    setInspecting(false);
+  };
+
   return (
-    <div style={{ marginBottom: 6 }} title={tooltip}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-        <span style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
-        <span style={{ fontSize: 10, fontFamily: 'monospace', color }}>{(value * 100).toFixed(0)}%</span>
+    <div>
+      <div
+        onClick={inspect}
+        title="Click to inspect artifact metadata"
+        style={{
+          fontSize: 8, fontFamily: 'monospace',
+          color: C.accent, wordBreak: 'break-all',
+          background: C.bg, borderRadius: 4,
+          padding: '4px 6px', border: `1px solid ${C.border}`,
+          cursor: 'pointer', lineHeight: 1.5,
+          transition: 'border-color 0.15s',
+        }}
+        onMouseEnter={e => e.currentTarget.style.borderColor = C.accent + '60'}
+        onMouseLeave={e => e.currentTarget.style.borderColor = C.border}
+      >
+        {inspecting ? '…' : `${artifactId?.slice(0, 24)}…`}
       </div>
-      <div style={{ height: 3, background: C.border, borderRadius: 9 }}>
-        <div style={{ height: '100%', width: `${value * 100}%`, background: color, borderRadius: 9, transition: 'width 0.5s ease' }} />
-      </div>
+      {meta && !meta.error && (
+        <div style={{ fontSize: 8, color: C.muted, marginTop: 4, lineHeight: 1.6, fontFamily: 'monospace' }}>
+          v{meta.schema_version} · {meta.payload_summary?.count ?? '?'} items
+        </div>
+      )}
     </div>
   );
 }
 
-function Badge({ text, color }) {
-  return (
-    <span style={{
-      fontSize: 9, fontFamily: 'monospace', padding: '2px 7px', borderRadius: 4,
-      background: `${color}20`, border: `1px solid ${color}50`, color,
-      letterSpacing: '0.06em', whiteSpace: 'nowrap',
-    }}>{text}</span>
-  );
-}
+export default function LeftPanel() {
+  const {
+    timeline, runs, runId, determinismOk, artifacts, hitlLedger, snapshots,
+    layers, toggleLayer, setLayerVisible,
+    layerOpacities, setLayerOpacity,
+    layerRenderModes, setLayerRenderMode,
+    irLevel, setIrLevel,
+    compareRunId, setCompareMode, setCompareSnapshots, setLoading,
+  } = useWorkbenchStore();
+  const [tab, setTab] = useState('stages'); // 'stages' | 'layers' | 'timeline' | 'artifacts'
 
-function SectionTitle({ children }) {
-  return (
-    <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10, fontWeight: 700 }}>
-      {children}
-    </div>
-  );
-}
+  const timelineStages = timeline?.stages ?? [];
+  const allStages = PIPELINE_STAGES.map(ps => {
+    const backendStage = timelineStages.find(s => s.stage_name === ps.name || s.output_type === ps.type);
+    return { ...ps, artifact_id: backendStage?.artifact_id, produced: !!backendStage };
+  });
 
-function HitlButton({ label, icon, color, onClick, disabled, title }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      style={{
-        width: '100%', padding: '7px 10px', borderRadius: 7,
-        border: `1px solid ${color}40`,
-        background: `${color}10`,
-        color, fontSize: 11, cursor: disabled ? 'not-allowed' : 'pointer',
-        fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
-        opacity: disabled ? 0.45 : 1,
-        transition: 'all 0.15s', marginBottom: 5,
-        textAlign: 'left',
-      }}
-      onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = `${color}20`; }}
-      onMouseLeave={e => { if (!disabled) e.currentTarget.style.background = `${color}10`; }}
-    >
-      <span style={{ fontSize: 12 }}>{icon}</span>
-      <span>{label}</span>
-    </button>
-  );
-}
-
-export default function LeftPanel({ onHitlOp }) {
-  const { selected, runId, loading, snapshots, layers, toggleLayer, hitlLedger } = useWorkbenchStore();
-  const [hitlView, setHitlView] = useState('inspector'); // 'inspector' | 'hitl' | 'ledger'
-
-  const sel = selected;
-  const isRegion = sel?.type === 'region';
-  const isToken  = sel?.type === 'token';
-  const isField  = sel?.type === 'field';
-
-  // Dispatch HITL — uses backend operation types from hitl/models.py
-  const dispatch = (operation_type, extra = {}) => {
-    if (!sel || !runId) return;
-    onHitlOp({
-      operation_type,
-      target_evidence_ids: [sel.data.id],
-      payload: extra,
+  const handleIsolateLayer = (targetKey) => {
+    Object.keys(layers).forEach(k => {
+      setLayerVisible(k, k === targetKey);
     });
   };
+
+  const LAYER_GROUPS = [
+    {
+      name: '🧱 Structural Layers',
+      desc: 'Lattices, grids, and boundaries',
+      items: [
+        { key: 'geometry', label: 'Geometry Regions', color: '#3B82F6' },
+        { key: 'topology', label: 'Table Topology', color: '#FBBF24' },
+        { key: 'coordinate_space', label: 'Coordinate Spaces', color: '#06B6D4' },
+      ]
+    },
+    {
+      name: '🧠 Semantic Layers',
+      desc: 'Text tokens and resolved values',
+      items: [
+        { key: 'ocr', label: 'OCR Tokens', color: '#10B981' },
+        { key: 'alignment', label: 'Alignment Edges', color: '#EC4899' },
+        { key: 'fusion', label: 'Resolved Fields', color: '#8B5CF6' },
+      ]
+    },
+    {
+      name: '⚠️ Attention Layers',
+      desc: 'Mathematical contours and conflicts',
+      items: [
+        { key: 'shapes', label: 'Primitive Contours', color: '#F59E0B' },
+        { key: 'conflict', label: 'Conflict Edges', color: '#EF4444' },
+        { key: 'orphan', label: 'Orphan Tokens', color: '#F97316' },
+        { key: 'hitl', label: 'HITL Operations', color: '#A78BFA' },
+      ]
+    },
+    {
+      name: '⚙️ Workspace Controls',
+      desc: 'Minimap & cursor metrics options',
+      items: [
+        { key: 'minimap', label: 'Viewport Minimap', color: '#10B981' },
+        { key: 'coord_tooltip', label: 'Cursor Coordinates', color: '#0EA5E9' },
+      ]
+    }
+  ];
 
   return (
     <aside style={{
@@ -117,264 +182,327 @@ export default function LeftPanel({ onHitlOp }) {
       background: C.panel,
       borderRight: `1px solid ${C.border}`,
       display: 'flex', flexDirection: 'column',
-      overflowY: 'auto',
+      overflow: 'hidden',
       flexShrink: 0,
     }}>
-
       {/* Tab bar */}
-      <div style={{ display: 'flex', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+      <div style={{ display: 'flex', borderBottom: `1px solid ${C.border}`, flexShrink: 0, flexWrap: 'wrap' }}>
         {[
-          { key: 'inspector', label: '🔍 Inspector' },
-          { key: 'hitl',      label: '✏ HITL Ops' },
-          { key: 'ledger',    label: `📋 Ledger${hitlLedger.length > 0 ? ` (${hitlLedger.length})` : ''}` },
-        ].map(tab => (
+          { key: 'stages',    label: '📋 Stages' },
+          { key: 'layers',    label: '🌳 Layers' },
+          { key: 'timeline',  label: '⏱ Replays' },
+          { key: 'artifacts', label: '📦 Artifacts' },
+        ].map(t => (
           <button
-            key={tab.key}
-            id={`left-tab-${tab.key}`}
-            onClick={() => setHitlView(tab.key)}
+            key={t.key}
+            id={`left-tab-${t.key}`}
+            onClick={() => setTab(t.key)}
             style={{
-              flex: 1, padding: '10px 4px', fontSize: 10, fontWeight: 600,
+              flex: 1, padding: '10px 2px', fontSize: 9, fontWeight: 600,
               background: 'transparent', border: 'none',
-              borderBottom: `2px solid ${hitlView === tab.key ? C.blue : 'transparent'}`,
-              color: hitlView === tab.key ? C.text : C.muted,
+              borderBottom: `2px solid ${tab === t.key ? C.blue : 'transparent'}`,
+              color: tab === t.key ? C.text : C.muted,
               cursor: 'pointer', transition: 'all 0.15s',
+              minWidth: '60px',
             }}
           >
-            {tab.label}
+            {t.label}
           </button>
         ))}
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px' }}>
-        {/* ── INSPECTOR TAB ─────────────────────────────────────────── */}
-        {hitlView === 'inspector' && (
-          <AnimatePresence mode="wait">
-            {sel ? (
-              <motion.div
-                key={sel.data.id}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.15 }}
-              >
-                {/* Element type + basic info */}
-                <div style={{ background: C.bg, borderRadius: 8, padding: 12, border: `1px solid ${C.border}`, marginBottom: 10 }}>
-                  <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-                    <Badge
-                      text={sel.type.toUpperCase()}
-                      color={sel.type === 'token' ? C.green : sel.type === 'region' ? C.blue : sel.type === 'field' ? C.purple : C.pink}
-                    />
-                    {sel.data.confidence != null && (
-                      <Badge
-                        text={`${(sel.data.confidence * 100).toFixed(0)}% conf`}
-                        color={sel.data.confidence > 0.85 ? C.green : sel.data.confidence > 0.6 ? C.yellow : C.red}
-                      />
-                    )}
+        {/* ── STAGES TAB ────────────────────────────────────────────── */}
+        {tab === 'stages' && (
+          <div>
+            <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12, fontWeight: 700 }}>
+              Pipeline Stages
+            </div>
+            {allStages.map((stage, i) => {
+              const color = STAGE_COLORS[stage.name] ?? C.muted;
+              return (
+                <div
+                  key={stage.name}
+                  style={{
+                    background: C.bg, borderRadius: 6, padding: '8px 10px',
+                    border: `1px solid ${stage.produced ? C.border : 'rgba(26,36,56,0.4)'}`,
+                    marginBottom: 10, opacity: stage.produced ? 1 : 0.5,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: C.text }}>
+                      {stage.label}
+                    </span>
+                    <span style={{
+                      fontSize: 8, padding: '1px 5px', borderRadius: 3,
+                      background: stage.produced ? `${color}20` : 'transparent',
+                      border: `1px solid ${stage.produced ? color + '40' : C.border}`,
+                      color: stage.produced ? color : C.muted
+                    }}>
+                      {stage.produced ? 'Active' : 'Pending'}
+                    </span>
                   </div>
-
-                  {/* Text value (OCR token) */}
-                  {sel.data.text && (
-                    <div style={{ fontSize: 14, color: C.text, fontWeight: 600, marginBottom: 6, direction: 'rtl' }}>
-                      "{sel.data.text}"
-                    </div>
-                  )}
-
-                  {/* stable_id (immutable SHA-256 hash from backend) */}
-                  <div style={{ fontSize: 9, fontFamily: 'monospace', color: C.muted, wordBreak: 'break-all', lineHeight: 1.6 }}>
-                    <span style={{ color: C.accent }}>stable_id: </span>{sel.data.id ?? sel.data.field_id ?? '—'}
+                  <div style={{ fontSize: 8, color: C.muted, fontFamily: 'monospace' }}>
+                    Output: {stage.type}
                   </div>
-
-                  {/* BBox */}
-                  {sel.data.bbox && (
-                    <div style={{ fontSize: 9, fontFamily: 'monospace', color: C.muted, marginTop: 4 }}>
-                      <span style={{ color: C.accent }}>bbox: </span>
-                      [{sel.data.bbox.map(v => Math.round(v)).join(', ')}]
-                    </div>
-                  )}
-
-                  {/* Alignment type (for alignment edges) */}
-                  {sel.data.type && sel.type === 'alignment' && (
-                    <div style={{ fontSize: 9, fontFamily: 'monospace', color: C.pink, marginTop: 4 }}>
-                      type: {sel.data.type} · score: {(sel.data.score * 100).toFixed(0)}%
+                  {stage.artifact_id && (
+                    <div style={{ marginTop: 6 }}>
+                      <ArtifactBadge artifactId={stage.artifact_id} />
                     </div>
                   )}
                 </div>
-
-                {/* ConfidenceBreakdown — from fusion/models.py ConfidenceBreakdown */}
-                {isField && sel.data.confidence_breakdown && (() => {
-                  const cb = sel.data.confidence_breakdown;
-                  const final = computeFinalScore(cb);
-                  return (
-                    <div style={{ background: C.bg, borderRadius: 8, padding: 12, border: `1px solid ${C.border}`, marginBottom: 10 }}>
-                      <SectionTitle>Confidence Breakdown</SectionTitle>
-                      <ConfBar label="Geometry Score"    value={cb.geometry_score    ?? 0} color={C.blue}   tooltip="Spatial overlap quality (×0.4)" />
-                      <ConfBar label="Assignment Score"  value={cb.assignment_score  ?? 0} color={C.green}  tooltip="Alignment edge strength (×0.4)" />
-                      <ConfBar label="Text Score"        value={cb.text_score        ?? 0} color={C.yellow} tooltip="OCR confidence (×0.2)" />
-                      {(cb.anchor_penalty ?? 0) > 0 && (
-                        <ConfBar label="Anchor Penalty" value={cb.anchor_penalty} color={C.orange} tooltip="Anchor region penalty" />
-                      )}
-                      {(cb.conflict_penalty ?? 0) > 0 && (
-                        <ConfBar label="Conflict Penalty" value={cb.conflict_penalty} color={C.red} tooltip={`${(cb.conflict_penalty / 0.1).toFixed(0)} conflict edges × 0.1`} />
-                      )}
-                      {(cb.human_override_score ?? 0) > 0 && (
-                        <ConfBar label="HITL Boost" value={cb.human_override_score} color={C.purple} tooltip="Human correction boost" />
-                      )}
-                      <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 8, paddingTop: 8 }}>
-                        <ConfBar label="Final Score" value={final} color={C.accent} tooltip="(geo×0.4)+(assign×0.4)+(text×0.2) - penalties + hitl" />
-                      </div>
-                      <div style={{ fontSize: 8, color: C.muted, marginTop: 6, fontFamily: 'monospace', lineHeight: 1.5 }}>
-                        = (geo×0.4) + (assign×0.4) + (text×0.2) − penalties + hitl_boost
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Provenance — ResolvedFieldProvenance from fusion/models.py */}
-                {isField && (sel.data.ocr_tokens?.length > 0 || sel.data.alignment_edges?.length > 0) && (
-                  <div style={{ background: C.bg, borderRadius: 8, padding: 12, border: `1px solid ${C.border}`, marginBottom: 10 }}>
-                    <SectionTitle>Provenance Graph</SectionTitle>
-                    <div style={{ fontSize: 10, color: C.muted, lineHeight: 1.8 }}>
-                      <div>
-                        <span style={{ color: C.green }}>OCR Tokens: </span>
-                        <span style={{ fontFamily: 'monospace', color: C.text }}>{sel.data.ocr_tokens?.length ?? 0}</span>
-                      </div>
-                      <div>
-                        <span style={{ color: C.pink }}>Alignment Edges: </span>
-                        <span style={{ fontFamily: 'monospace', color: C.text }}>{sel.data.alignment_edges?.length ?? 0}</span>
-                      </div>
-                      {sel.data.field_type && (
-                        <div>
-                          <span style={{ color: C.purple }}>Field Type: </span>
-                          <span style={{ fontFamily: 'monospace', color: C.text }}>{sel.data.field_type}</span>
-                        </div>
-                      )}
-                    </div>
-                    {sel.data.ocr_tokens?.slice(0, 3).map((tid, i) => (
-                      <div key={i} style={{ fontSize: 8, fontFamily: 'monospace', color: C.muted, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        → {tid}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* HITL Quick Actions — based on element type */}
-                {(isRegion || isToken) && runId && (
-                  <div style={{ background: C.bg, borderRadius: 8, padding: 12, border: `1px solid ${C.border}20`, marginBottom: 10 }}>
-                    <SectionTitle>Quick HITL Actions</SectionTitle>
-                    <div style={{ fontSize: 9, color: C.muted, marginBottom: 8, lineHeight: 1.6 }}>
-                      Operations are logged in the immutable ledger then trigger /hitl/rerun from evidence_patching stage.
-                    </div>
-                    {isRegion && (
-                      <>
-                        <HitlButton
-                          icon="⛔" label="Reject Region"
-                          color={C.red}
-                          onClick={() => dispatch(HITL_OP_TYPES.LINE_REJECTION)}
-                          disabled={loading}
-                          title="POST /hitl/operations: line_rejection"
-                        />
-                        <HitlButton
-                          icon="✅" label="Approve Region"
-                          color={C.green}
-                          onClick={() => dispatch(HITL_OP_TYPES.LINE_APPROVAL)}
-                          disabled={loading}
-                          title="POST /hitl/operations: line_approval"
-                        />
-                      </>
-                    )}
-                    {isToken && (
-                      <HitlButton
-                        icon="🔗" label="Reassign Token"
-                        color={C.yellow}
-                        onClick={() => dispatch(HITL_OP_TYPES.TOKEN_REASSIGNMENT, { token_id: sel.data.id, new_region_id: '' })}
-                        disabled={loading}
-                        title="POST /hitl/operations: token_reassignment"
-                      />
-                    )}
-                  </div>
-                )}
-              </motion.div>
-            ) : (
-              <motion.div
-                key="empty"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                style={{ border: `1px dashed ${C.border}`, borderRadius: 8, padding: 28, textAlign: 'center', marginTop: 10 }}
-              >
-                <div style={{ fontSize: 28, marginBottom: 10, opacity: 0.25 }}>🔍</div>
-                <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.6 }}>
-                  Click any token, region, or field on the canvas to inspect its provenance and evidence graph
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+              );
+            })}
+          </div>
         )}
 
-        {/* ── HITL OPS TAB ──────────────────────────────────────────── */}
-        {hitlView === 'hitl' && (
-          <div>
-            <SectionTitle>HITL Editor — Intent-Based Operations</SectionTitle>
-            <div style={{ fontSize: 10, color: C.muted, marginBottom: 14, lineHeight: 1.7 }}>
-              Select an element on the canvas, then choose an operation. Operations are logged in the immutable ledger and trigger a deterministic replay from <span style={{ color: C.accent, fontFamily: 'monospace' }}>evidence_patching</span> stage.
-            </div>
-
-            {!sel && (
-              <div style={{ fontSize: 10, color: C.yellow, background: `${C.yellow}10`, border: `1px solid ${C.yellow}30`, borderRadius: 6, padding: '8px 10px', marginBottom: 12 }}>
-                ⚠ Select an element on the document canvas first
+        {/* ── LAYERS TAB ────────────────────────────────────────────── */}
+        {tab === 'layers' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* 1. IR Compiler Level Stepper */}
+            <div>
+              <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, fontWeight: 700 }}>
+                Visual Compiler IR Levels
               </div>
-            )}
-
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 9, color: C.blue, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Region Operations</div>
-              <HitlButton icon="⛔" label="Reject Region (line_rejection)"    color={C.red}    onClick={() => dispatch(HITL_OP_TYPES.LINE_REJECTION)} disabled={!isRegion || loading} title="HumanLineRejection → removes region from evidence" />
-              <HitlButton icon="✅" label="Approve Region (line_approval)"    color={C.green}  onClick={() => dispatch(HITL_OP_TYPES.LINE_APPROVAL)}  disabled={!isRegion || loading} title="HumanLineApproval → boosts confidence" />
-              <HitlButton icon="🔀" label="Merge Regions (region_merge)"      color={C.yellow} onClick={() => dispatch(HITL_OP_TYPES.REGION_MERGE, { source_regions: [sel?.data?.id] })} disabled={!isRegion || loading} title="HumanRegionMerge → merges selected + target" />
-              <HitlButton icon="✂" label="Split Region (region_split)"       color={C.orange} onClick={() => dispatch(HITL_OP_TYPES.REGION_SPLIT, { source_region: sel?.data?.id, split_coordinates: { x: 0.5 } })} disabled={!isRegion || loading} title="HumanRegionSplit → splits at midpoint" />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, background: C.bg, padding: 8, borderRadius: 8, border: `1px solid ${C.border}` }}>
+                {[
+                  { key: 'raw_geometry', label: '1. Raw Geometry IR', desc: 'Contours & lines (no context)' },
+                  { key: 'structural', label: '2. Structural IR', desc: 'Grid lattice & suppression context' },
+                  { key: 'coordinate', label: '3. Coordinate IR', desc: 'DPI normalized & calibrated scales' },
+                  { key: 'cognitive', label: '4. Cognitive IR', desc: 'Salient evidence filters (no noise)' },
+                  { key: 'reasoning', label: '5. Semantic IR', desc: 'Unified resolved medical entities' },
+                ].map(lvl => {
+                  const isActive = irLevel === lvl.key;
+                  return (
+                    <button
+                      key={lvl.key}
+                      onClick={() => setIrLevel(lvl.key)}
+                      style={{
+                        textAlign: 'left',
+                        padding: '6px 10px',
+                        borderRadius: 6,
+                        border: `1px solid ${isActive ? C.accent : 'transparent'}`,
+                        background: isActive ? `${C.accent}15` : 'transparent',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s',
+                        width: '100%',
+                      }}
+                    >
+                      <div style={{ fontSize: 10, fontWeight: 700, color: isActive ? C.accent : C.text }}>
+                        {lvl.label}
+                      </div>
+                      <div style={{ fontSize: 8, color: C.muted, marginTop: 2 }}>
+                        {lvl.desc}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 9, color: C.green, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Token Operations</div>
-              <HitlButton icon="🔗" label="Reassign Token (token_reassignment)" color={C.green} onClick={() => dispatch(HITL_OP_TYPES.TOKEN_REASSIGNMENT, { token_id: sel?.data?.id, new_region_id: '' })} disabled={!isToken || loading} title="HumanTokenReassignment" />
+            {/* 2. Hierarchical Layer Tree */}
+            <div>
+              <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, fontWeight: 700 }}>
+                Spatial Representation Layers
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {LAYER_GROUPS.map((group) => (
+                  <div key={group.name} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '2px 4px' }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: C.text }}>{group.name}</span>
+                      <span style={{ fontSize: 8, color: C.muted }}>{group.desc}</span>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, borderLeft: `1px solid ${C.border}`, marginLeft: 4, paddingLeft: 4 }}>
+                      {group.items.map((item) => {
+                        const visible = !!layers[item.key];
+                        const opacity = layerOpacities[item.key] ?? 1.0;
+                        return (
+                          <div key={item.key} style={{
+                            display: 'flex', flexDirection: 'column', gap: 4,
+                            padding: '6px 8px', borderRadius: 6, background: C.bg,
+                            border: `1px solid ${visible ? C.border : 'rgba(26,36,56,0.3)'}`,
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <div style={{ width: 6, height: 6, borderRadius: '50%', background: item.color }} />
+                              <span style={{ fontSize: 9, fontWeight: 500, color: visible ? C.text : C.muted, flex: 1, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                                {item.label}
+                              </span>
+
+                              {/* Visibility */}
+                              <button
+                                onClick={() => toggleLayer(item.key)}
+                                style={{
+                                  background: 'transparent', border: 'none', color: visible ? item.color : C.muted,
+                                  cursor: 'pointer', fontSize: 10, padding: '2px 4px',
+                                }}
+                                title={visible ? "Hide Layer" : "Show Layer"}
+                              >
+                                {visible ? '👁️' : '🙈'}
+                              </button>
+
+                              {/* Isolate */}
+                              <button
+                                onClick={() => handleIsolateLayer(item.key)}
+                                style={{
+                                  background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 3,
+                                  color: C.muted, cursor: 'pointer', fontSize: 7, padding: '1px 3px',
+                                  fontWeight: 700,
+                                }}
+                                title="Isolate Layer"
+                              >
+                                ISO
+                              </button>
+                            </div>
+
+                            {visible && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 12 }}>
+                                <span style={{ fontSize: 7, color: C.muted }}>Opacity</span>
+                                <input
+                                  type="range"
+                                  min="0.1"
+                                  max="1"
+                                  step="0.05"
+                                  value={opacity}
+                                  onChange={(e) => setLayerOpacity(item.key, parseFloat(e.target.value))}
+                                  style={{ flex: 1, accentColor: item.color, height: 2, cursor: 'pointer' }}
+                                />
+                                <span style={{ fontSize: 7, color: C.text, fontFamily: 'monospace' }}>
+                                  {Math.round(opacity * 100)}%
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
 
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 9, color: C.purple, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Checkbox Operations</div>
-              <HitlButton icon="☑" label="Set Checkbox True (checkbox_correction)"  color={C.purple} onClick={() => dispatch(HITL_OP_TYPES.CHECKBOX_CORRECTION, { region_id: sel?.data?.id, new_state: true })} disabled={!isRegion || loading} title="HumanCheckboxCorrection: new_state=true" />
-              <HitlButton icon="☐" label="Set Checkbox False (checkbox_correction)" color={C.pink}   onClick={() => dispatch(HITL_OP_TYPES.CHECKBOX_CORRECTION, { region_id: sel?.data?.id, new_state: false })} disabled={!isRegion || loading} title="HumanCheckboxCorrection: new_state=false" />
-            </div>
-
-            <div style={{ fontSize: 9, color: C.muted, background: `${C.blue}08`, border: `1px solid ${C.blue}20`, borderRadius: 6, padding: '8px 10px', lineHeight: 1.6 }}>
-              🔒 The UI never directly modifies evidence. All operations are sent as <span style={{ color: C.blue }}>HumanOperation</span> intents to the backend ledger, then a replay regenerates all downstream artifacts.
+            {/* 3. Adaptive Suppression Visualizer Info */}
+            <div style={{ background: 'rgba(245, 158, 11, 0.05)', border: '1px dashed rgba(245, 158, 11, 0.25)', borderRadius: 8, padding: 10 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: '#FBBF24', marginBottom: 4 }}>
+                🛡 Perceptual Suppression Visualizer
+              </div>
+              <div style={{ fontSize: 8, color: C.muted, lineHeight: 1.4 }}>
+                Periodic structural filters running at <strong>98% lattice confidence</strong>. Noise objects matching pre-printed templates are auto-suppressed.
+              </div>
             </div>
           </div>
         )}
 
-        {/* ── LEDGER TAB ────────────────────────────────────────────── */}
-        {hitlView === 'ledger' && (
+        {/* ── TIMELINE TAB ──────────────────────────────────────────── */}
+        {tab === 'timeline' && (
           <div>
-            <SectionTitle>Operations Ledger</SectionTitle>
-            {hitlLedger.length === 0 ? (
+            {/* Run metadata */}
+            {runId && (
+              <div style={{ background: C.bg, borderRadius: 7, padding: 10, border: `1px solid ${C.border}`, marginBottom: 14 }}>
+                <div style={{ fontSize: 9, color: C.muted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Current Run</div>
+                <div style={{ fontSize: 9, fontFamily: 'monospace', color: C.accent, wordBreak: 'break-all', marginBottom: 4 }}>
+                  {runId}
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <span style={{
+                    fontSize: 8, padding: '2px 7px', borderRadius: 4, fontWeight: 700,
+                    background: determinismOk ? `${C.green}15` : `${C.red}15`,
+                    border: `1px solid ${determinismOk ? C.green + '40' : C.red + '40'}`,
+                    color: determinismOk ? C.green : C.red,
+                  }}>
+                    {determinismOk ? '✓ DETERMINISTIC' : '⚠ DRIFT'}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Run history list */}
+            <div>
+              <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 10, fontWeight: 700 }}>
+                Run Execution History
+              </div>
+              {runs.length === 0 ? (
+                <div style={{ fontSize: 11, color: C.muted, textAlign: 'center', padding: 20 }}>No runs yet</div>
+              ) : (
+                runs.map((run, i) => (
+                  <div key={run.run_id} style={{
+                    background: C.bg, borderRadius: 7, padding: 10, marginBottom: 8,
+                    border: `1px solid ${i === 0 ? C.blue + '40' : C.border}`,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontSize: 9, fontFamily: 'monospace', color: C.accent }}>
+                        {run.run_id?.slice(0, 16)}…
+                      </span>
+                      {i === 0 && <span style={{ fontSize: 8, color: C.blue, fontWeight: 700 }}>CURRENT</span>}
+                    </div>
+                    <div style={{ fontSize: 8, color: C.muted, marginBottom: 4 }}>
+                      {new Intl.DateTimeFormat('en-GB', { timeStyle: 'medium' }).format(new Date(run.timestamp))}
+                    </div>
+                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 3, background: `${run.determinism_ok ? C.green : C.red}15`, color: run.determinism_ok ? C.green : C.red, border: `1px solid ${run.determinism_ok ? C.green : C.red}30` }}>
+                        {run.determinism_ok ? '✓ Det.' : '⚠ Drift'}
+                      </span>
+                      {run.is_hitl_rerun && (
+                        <span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 3, background: `${C.purple}15`, color: C.purple, border: `1px solid ${C.purple}30` }}>
+                          HITL Rerun
+                        </span>
+                      )}
+                      {run.run_id !== runId && (
+                        <button
+                          onClick={async () => {
+                            if (compareRunId === run.run_id) {
+                              setCompareMode(false);
+                            } else {
+                              setLoading(true, 'Fetching comparison run...');
+                              try {
+                                const snaps = await pipelineService.getAllSnapshots(run.run_id);
+                                setCompareSnapshots({ run_id: run.run_id, snapshots: snaps });
+                                setCompareMode(true);
+                              } catch (e) {
+                                console.error('Failed to load comparison snapshots', e);
+                              } finally {
+                                setLoading(false);
+                              }
+                            }
+                          }}
+                          style={{
+                            fontSize: 8, padding: '2px 6px', borderRadius: 3,
+                            background: compareRunId === run.run_id ? C.accent : 'transparent',
+                            border: `1px solid ${C.accent}`,
+                            color: compareRunId === run.run_id ? '#000000' : C.accent,
+                            cursor: 'pointer',
+                            fontWeight: 700,
+                            marginLeft: 'auto',
+                          }}
+                        >
+                          {compareRunId === run.run_id ? 'Comparing ✓' : 'Compare'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── ARTIFACTS TAB ─────────────────────────────────────────── */}
+        {tab === 'artifacts' && (
+          <div>
+            <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12, fontWeight: 700 }}>
+              Artifact References
+            </div>
+            {Object.keys(artifacts).length === 0 ? (
               <div style={{ fontSize: 11, color: C.muted, textAlign: 'center', padding: 20 }}>
-                No HITL operations recorded for this run
+                Run the pipeline first
               </div>
             ) : (
-              hitlLedger.map((op, i) => (
-                <div key={op.operation_id ?? i} style={{
-                  background: C.bg, borderRadius: 7, padding: 10, marginBottom: 8,
-                  border: `1px solid ${C.border}`,
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <Badge text={op.operation_type} color={C.purple} />
-                    <span style={{ fontSize: 8, color: C.muted, fontFamily: 'monospace' }}>
-                      {op.timestamp ? new Date(op.timestamp).toLocaleTimeString() : '—'}
-                    </span>
+              Object.entries(artifacts).map(([type, id]) => (
+                <div key={type} style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 9, color: C.purple, fontWeight: 700, marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    {type}
                   </div>
-                  <div style={{ fontSize: 8, color: C.muted, fontFamily: 'monospace' }}>
-                    op_id: {op.operation_id?.slice(0, 16)}…
-                  </div>
-                  <div style={{ fontSize: 8, color: C.muted, fontFamily: 'monospace' }}>
-                    targets: {op.target_evidence_ids?.length ?? 0} evidence items
-                  </div>
+                  <ArtifactBadge artifactId={id} />
                 </div>
               ))
             )}

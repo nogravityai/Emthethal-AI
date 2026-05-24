@@ -57,6 +57,7 @@ export default function TopBar({ onRunDemo, onUploadClick }) {
     compareMode, setCompareMode,
     zoom, adjustZoom, resetView,
     status, snapshots,
+    workspaceMode, setWorkspaceMode,
   } = useWorkbenchStore();
 
   const tokenCount  = snapshots.ocr?.tokens?.length ?? 0;
@@ -89,7 +90,7 @@ export default function TopBar({ onRunDemo, onUploadClick }) {
             Evidence Workbench
           </div>
           <div style={{ fontSize: 8, color: C.accent, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-            CFIS · Phase 3 · v{pipelineVersion}
+            CFIS · Spatial IDE
           </div>
         </div>
       </div>
@@ -98,34 +99,41 @@ export default function TopBar({ onRunDemo, onUploadClick }) {
 
       {/* Document actions */}
       <IconBtn id="wb-upload" icon="📄" label="Upload PDF" onClick={onUploadClick} disabled={loading} />
-      <IconBtn id="wb-demo"   icon="▶" label="Demo Fixture" onClick={onRunDemo} disabled={loading} color={C.green} />
+      {workspaceMode !== 'inspect' && (
+        <IconBtn id="wb-demo"   icon="▶" label="Demo Fixture" onClick={onRunDemo} disabled={loading} color={C.green} />
+      )}
 
       <div style={{ width: 1, height: 28, background: C.border, flexShrink: 0 }} />
 
-      {/* Layer toggles */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-        <span style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em', marginRight: 4 }}>Layers</span>
-        {Object.entries(LAYER_META).map(([key, meta]) => (
-          <button
-            key={key}
-            id={`layer-toggle-${key}`}
-            onClick={() => toggleLayer(key)}
-            title={`${meta.label} (${meta.shortcut})`}
-            aria-label={`Toggle ${meta.label} layer`}
-            aria-pressed={layers[key]}
-            style={{
-              padding: '3px 8px', borderRadius: 5,
-              border: `1px solid ${layers[key] ? meta.color + '60' : C.border}`,
-              background: layers[key] ? meta.color + '18' : 'transparent',
-              color: layers[key] ? meta.color : C.muted,
-              fontSize: 9, fontWeight: 700, cursor: 'pointer',
-              letterSpacing: '0.04em', whiteSpace: 'nowrap',
-              transition: 'all 0.15s',
-            }}
-          >
-            {meta.label.split(' ')[0]}
-          </button>
-        ))}
+      {/* Workspace Modes Selector */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: C.bg, padding: 3, borderRadius: 8, border: `1px solid ${C.border}`, flexShrink: 0 }}>
+        {[
+          { mode: 'inspect', label: 'Inspect', icon: '👁️' },
+          { mode: 'debug', label: 'Debug', icon: '🛠️' },
+          { mode: 'replay', label: 'Replay', icon: '🔄' },
+          { mode: 'chart', label: 'Chart', icon: '📈' },
+        ].map(m => {
+          const active = workspaceMode === m.mode;
+          return (
+            <button
+              key={m.mode}
+              onClick={() => setWorkspaceMode(m.mode)}
+              title={`${m.label} Mode`}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '4px 10px', borderRadius: 6,
+                border: 'none',
+                background: active ? '#1E293B' : 'transparent',
+                color: active ? '#3B82F6' : C.muted,
+                fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                transition: 'all 0.15s',
+              }}
+            >
+              <span style={{ fontSize: 11 }}>{m.icon}</span>
+              <span style={{ whiteSpace: 'nowrap' }}>{m.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       <div style={{ width: 1, height: 28, background: C.border, flexShrink: 0 }} />

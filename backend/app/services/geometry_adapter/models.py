@@ -75,6 +75,13 @@ class SpatialRegionEvidence(BaseModel):
     source_stage: str = "geometry_ingestion"
     pipeline_version: str = "3.0.0"
 
+    # Semantic/Topology properties
+    logical_row_id: Optional[str] = None
+    logical_col_id: Optional[str] = None
+    logical_cell_id: Optional[str] = None
+    table_id: Optional[str] = None
+
+
     @classmethod
     def create_from_box(cls, box: DetectedBoxEvidence):
         s_id = generate_stable_id("region", box.stable_id)

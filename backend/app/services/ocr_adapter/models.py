@@ -36,6 +36,13 @@ class OCRTokenEvidence(BaseModel):
     
     provenance: EvidenceProvenance
     transform_trace: Optional[CoordinateTransformTrace] = None
+
+    # Semantic/Topology properties
+    logical_row_id: Optional[str] = None
+    logical_col_id: Optional[str] = None
+    logical_cell_id: Optional[str] = None
+    table_id: Optional[str] = None
+
     
     @classmethod
     def create(cls, text: str, bbox: BoundingBox, confidence: float, source_engine: str, page_number: int, trace: CoordinateTransformTrace = None, engine_version: str = "unknown") -> "OCRTokenEvidence":

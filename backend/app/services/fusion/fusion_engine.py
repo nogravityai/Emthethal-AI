@@ -27,6 +27,8 @@ from app.services.fusion.models import (
 )
 from app.services.alignment.models import AlignmentEvidence, AlignmentType
 
+from app.core.topology.semantic_grid import StructuralConfidenceEngine
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,7 +108,11 @@ class FusionEngine:
         self,
         consolidations: List[ConsolidatedHypothesis],
         alignments: List[AlignmentEvidence],
+        tokens: List[Any] = None,
+        regions: List[Any] = None,
+        linked_checkboxes: Dict[str, str] = None,
         page_number: int = 1,
+        operations: List[Any] = None
     ) -> List[ResolvedField]:
         """
         TASK-P3-09B / 09D — Produce ResolvedField with full provenance chain.
@@ -115,8 +121,27 @@ class FusionEngine:
         # Build quick lookup: alignment_id → AlignmentEvidence
         align_by_id = {ev.stable_id: ev for ev in alignments}
 
+        # Build lookup for relabel operations by region_id
+        relabel_by_region = {}
+        if operations:
+            for op in operations:
+                if getattr(op, "operation_type", None) == "relabel":
+                    region_ids = getattr(op, "target_evidence_ids", []) or [getattr(op, "region_id", None)]
+                    for r_id in region_ids:
+                        if r_id:
+                            relabel_by_region[r_id] = op
+
+        tokens_map = {t.stable_id: t for t in (tokens or []) if getattr(t, "stable_id", None)}
+        regions_map = {r.stable_id: r for r in (regions or []) if getattr(r, "stable_id", None)}
+        linked_checkboxes = linked_checkboxes or {}
+
+        structural_engine = StructuralConfidenceEngine()
+
         resolved = []
         for cons in consolidations:
+            # Check for human relabel correction
+            relabel_op = relabel_by_region.get(cons.target_region_id)
+
             # Confidence: penalise conflicts
             conflict_penalty = min(0.4, cons.conflict_count * 0.1)
             breakdown = ConfidenceBreakdown(
@@ -125,29 +150,33 @@ class FusionEngine:
                 conflict_penalty=conflict_penalty
             )
 
+            if relabel_op:
+                breakdown.human_override_score = 1.0  # Absolute truth injection
+
             # Build full provenance trail (TASK-P3-09D)
             prov = ResolvedFieldProvenance(
                 ocr_tokens=cons.ocr_token_ids,
                 alignment_edges=cons.alignment_ids,
                 geometry_regions=[cons.target_region_id],
+                human_operations=[relabel_op.operation_id] if relabel_op else []
             )
 
-            # Aggregate text value from tokens (order preserved, no NLP)
-            texts = []
-            for a_id in cons.alignment_ids:
-                ev = align_by_id.get(a_id)
-                if ev:
-                    # We carry the token id only; text retrieval happens at export
-                    pass   # value is populated when OCR evidence is joined at export layer
+            # Generate a stable, deterministic field ID (TASK-P3-09D)
+            f_id = generate_stable_id("field", cons.target_region_id, *cons.alignment_ids)
 
             field = ResolvedField(
+                field_id=f_id,
                 field_type="inferred",
-                value=None,            # populated at Export Layer, not here
+                value=relabel_op.new_value if relabel_op else None,
                 confidence_breakdown=breakdown,
                 resolved_provenance=prov,
                 supporting_hypotheses=cons.alignment_ids,  # migration compat
                 page_number=page_number
             )
+
+            # Apply Structural Confidence Multiplier
+            structural_engine.evaluate_field_confidence(field, tokens_map, regions_map, linked_checkboxes)
+
             resolved.append(field)
 
         return resolved
@@ -168,9 +197,35 @@ class AlignmentFusionStage:
         align_art = store.get(context.artifact_references["alignment_evidence"])
         alignments: List[AlignmentEvidence] = align_art.payload
 
+        # Retrieve operations from ledger
+        from app.services.hitl.operations_ledger import global_operations_ledger
+        operations = global_operations_ledger.get_operations_for_run(context.run_id)
+
+        # Retrieve ocr and geometry and topology artifacts for confidence resolution
+        ocr_art = store.get(context.artifact_references["ocr_evidence"]) if "ocr_evidence" in context.artifact_references else None
+        geom_art = store.get(context.artifact_references["geometry_evidence"]) if "geometry_evidence" in context.artifact_references else None
+        
+        linked_checkboxes = {}
+        if "topology_evidence" in context.artifact_references:
+            topo_art = store.get(context.artifact_references["topology_evidence"])
+            if hasattr(topo_art.payload, "linked_checkboxes"):
+                linked_checkboxes = topo_art.payload.linked_checkboxes
+            elif isinstance(topo_art.payload, dict):
+                linked_checkboxes = topo_art.payload.get("linked_checkboxes", {})
+
+        tokens = ocr_art.payload if ocr_art else []
+        regions = geom_art.payload.get("regions", []) if geom_art else []
+
         engine = FusionEngine()
         consolidations = engine.consolidate_evidence(alignments)
-        resolved = engine.generate_resolved_candidates(consolidations, alignments)
+        resolved = engine.generate_resolved_candidates(
+            consolidations,
+            alignments,
+            tokens=tokens,
+            regions=regions,
+            linked_checkboxes=linked_checkboxes,
+            operations=operations
+        )
 
         art_id = generate_stable_id("resolved", align_art.artifact_id)
         logger.info(f"Fusion complete: {len(resolved)} ResolvedFields produced from {len(alignments)} alignments.")
@@ -180,3 +235,5 @@ class AlignmentFusionStage:
             derived_from=[align_art.artifact_id],
             payload=resolved
         )
+
+

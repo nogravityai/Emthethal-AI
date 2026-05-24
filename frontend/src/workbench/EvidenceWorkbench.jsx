@@ -76,6 +76,8 @@ export default function EvidenceWorkbench() {
     setLoading, setStatus,
     setPageCanvas, setHitlLedger,
     resetWorkbench,
+    workspaceMode, isLeftCollapsed, isRightCollapsed,
+    setLeftCollapsed, setRightCollapsed,
   } = useWorkbenchStore();
 
   const fileRef = useRef();
@@ -85,8 +87,8 @@ export default function EvidenceWorkbench() {
     const handler = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-      // Layer toggles: 1–7
-      if (e.key >= '1' && e.key <= '7') {
+      // Layer toggles: 1–8
+      if (e.key >= '1' && e.key <= '8') {
         const layerKeys = Object.keys(LAYER_META);
         const idx = parseInt(e.key, 10) - 1;
         if (layerKeys[idx]) useWorkbenchStore.getState().toggleLayer(layerKeys[idx]);
@@ -199,14 +201,68 @@ export default function EvidenceWorkbench() {
       />
 
       {/* ── MAIN 3-COLUMN AREA ─────────────────────────────────────── */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
-        <LeftPanel onHitlOp={handleHitlOperation} />
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0, position: 'relative' }}>
+        {workspaceMode !== 'inspect' && !isLeftCollapsed && (
+          <LeftPanel onHitlOp={handleHitlOperation} />
+        )}
+
+        {workspaceMode !== 'inspect' && (
+          <button
+            onClick={() => setLeftCollapsed(!isLeftCollapsed)}
+            style={{
+              width: 10,
+              background: '#0B1120',
+              border: 'none',
+              borderRight: '1px solid #1A2438',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justify: 'center',
+              color: '#64748B',
+              fontSize: 8,
+              padding: 0,
+              zIndex: 10,
+            }}
+            title={isLeftCollapsed ? "Expand Left Panel" : "Collapse Left Panel"}
+          >
+            {isLeftCollapsed ? '▶' : '◀'}
+          </button>
+        )}
+
         <DocumentViewer />
-        <RightPanel />
+
+        {workspaceMode !== 'inspect' && (
+          <button
+            onClick={() => setRightCollapsed(!isRightCollapsed)}
+            style={{
+              width: 10,
+              background: '#0B1120',
+              border: 'none',
+              borderLeft: '1px solid #1A2438',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justify: 'center',
+              color: '#64748B',
+              fontSize: 8,
+              padding: 0,
+              zIndex: 10,
+            }}
+            title={isRightCollapsed ? "Expand Right Panel" : "Collapse Right Panel"}
+          >
+            {isRightCollapsed ? '◀' : '▶'}
+          </button>
+        )}
+
+        {workspaceMode !== 'inspect' && !isRightCollapsed && (
+          <RightPanel />
+        )}
       </div>
 
       {/* ── BOTTOM PANEL ────────────────────────────────────────────── */}
-      <BottomPanel />
+      {workspaceMode !== 'inspect' && (
+        <BottomPanel />
+      )}
 
       {/* ── GLOBAL LOADING OVERLAY ────────────────────────────────── */}
       <AnimatePresence>

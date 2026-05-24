@@ -164,47 +164,162 @@ function RawSnapshotView({ snapshots }) {
   );
 }
 
+function SystemLogsView({ snapshots, runs, determinismOk }) {
+  const logs = [];
+
+  // 1. Check determinism status
+  if (!determinismOk) {
+    logs.push({
+      type: 'error',
+      tag: 'DETERMINISM',
+      msg: 'Drift detected. Output artifact stable IDs have changed post-replay.'
+    });
+  } else if (runs.length > 0) {
+    logs.push({
+      type: 'info',
+      tag: 'REPLAY',
+      msg: `Replay successful. Pipeline states verified deterministic across ${runs.length} iterations.`
+    });
+  }
+
+  // 2. Check OCR token confidence
+  const lowConfTokens = snapshots.ocr?.tokens?.filter(t => t.confidence < 0.85) || [];
+  lowConfTokens.forEach(t => {
+    logs.push({
+      type: 'warning',
+      tag: 'OCR',
+      msg: `Low confidence OCR token "${t.text}" (${Math.round(t.confidence * 100)}%) at ID ${t.id.slice(0, 8)}.`
+    });
+  });
+
+  // 3. Check Geometry confidence
+  const lowConfRegions = snapshots.geometry?.regions?.filter(r => r.confidence < 0.80) || [];
+  lowConfRegions.forEach(r => {
+    logs.push({
+      type: 'warning',
+      tag: 'GEOMETRY',
+      msg: `Low confidence geometry bounding box region (${Math.round(r.confidence * 100)}%) at ID ${r.id.slice(0, 8)}.`
+    });
+  });
+
+  // 4. Check Coordinate space
+  if (snapshots.coordinate_space?.coordinate_space) {
+    logs.push({
+      type: 'info',
+      tag: 'COORD_SPACE',
+      msg: `Coordinate space detected: "${snapshots.coordinate_space.coordinate_space}" @ ${snapshots.coordinate_space.detected_dpi} DPI. Dimensions: ${snapshots.coordinate_space.page_width}x${snapshots.coordinate_space.page_height}.`
+    });
+  }
+
+  // 5. Shapes info
+  if (snapshots.shapes?.shapes?.length > 0) {
+    logs.push({
+      type: 'info',
+      tag: 'SHAPES',
+      msg: `PrimitiveShapeEngine successfully registered ${snapshots.shapes.shapes.length} geometric contour invariants.`
+    });
+  }
+
+  // 6. Conflicting alignment warnings
+  const overlaps = snapshots.alignment?.alignments?.filter(a => a.type === 'token_crosses_boundary') || [];
+  overlaps.forEach(a => {
+    logs.push({
+      type: 'warning',
+      tag: 'CONFLICT',
+      msg: `Boundary conflict: Token ${a.token.slice(0, 8)} crosses region boundary ${a.region.slice(0, 8)} (Score: ${Math.round(a.score * 100)}%).`
+    });
+  });
+
+  if (logs.length === 0) {
+    return (
+      <div style={{ color: C.muted, fontSize: 11, textAlign: 'center', padding: 20 }}>
+        No pipeline log events or warnings for this run.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {logs.map((log, i) => {
+        const color = log.type === 'error' ? C.red : log.type === 'warning' ? C.yellow : C.blue;
+        return (
+          <div key={i} style={{
+            background: C.bg, borderLeft: `3px solid ${color}`,
+            padding: '6px 12px', borderRadius: 4,
+            fontSize: 9, fontFamily: 'monospace', color: C.text,
+            display: 'flex', gap: 10, alignItems: 'center'
+          }}>
+            <span style={{ color, fontWeight: 700 }}>[{log.tag}]</span>
+            <span style={{ flex: 1 }}>{log.msg}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 const TABS = [
   { key: 'json',   label: '📄 Canonical JSON' },
   { key: 'formio', label: '📝 Form.io Preview' },
   { key: 'raw',    label: '🔬 Raw Evidence' },
   { key: 'diff',   label: '⚖ Before/After Diff' },
+  { key: 'logs',   label: '📋 Logs & Warnings' },
 ];
 
 const PANEL_H = 280;
 
 export default function BottomPanel() {
-  const { activeTab, setActiveTab, schema, snapshots, runs } = useWorkbenchStore();
+  const { activeTab, setActiveTab, schema, snapshots, runs, determinismOk, isBottomCollapsed, setBottomCollapsed } = useWorkbenchStore();
 
   const hasPrev = runs.length > 1;
 
   return (
     <div style={{
-      height: PANEL_H, flexShrink: 0,
+      height: isBottomCollapsed ? 32 : PANEL_H, flexShrink: 0,
       background: C.panel,
       borderTop: `1px solid ${C.border}`,
       display: 'flex', flexDirection: 'column',
       overflow: 'hidden',
+      transition: 'height 0.2s ease',
     }}>
       {/* Tab bar */}
-      <div style={{ display: 'flex', borderBottom: `1px solid ${C.border}`, flexShrink: 0, overflowX: 'auto' }}>
+      <div style={{ display: 'flex', borderBottom: isBottomCollapsed ? 'none' : `1px solid ${C.border}`, flexShrink: 0, alignItems: 'center', height: 32 }}>
+        {/* Collapse toggle */}
+        <button
+          id="toggle-bottom-panel"
+          onClick={() => setBottomCollapsed(!isBottomCollapsed)}
+          title={isBottomCollapsed ? "Expand Bottom Panel" : "Collapse Bottom Panel"}
+          aria-label={isBottomCollapsed ? "Expand Bottom Panel" : "Collapse Bottom Panel"}
+          style={{
+            background: 'transparent', border: 'none', color: C.muted,
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 32, height: 32, fontSize: 10,
+          }}
+        >
+          {isBottomCollapsed ? '▲' : '▼'}
+        </button>
+
         {TABS.map(t => (
           <button
             key={t.key}
             id={`bottom-tab-${t.key}`}
-            onClick={() => setActiveTab(t.key)}
+            onClick={() => {
+              setActiveTab(t.key);
+              if (isBottomCollapsed) setBottomCollapsed(false);
+            }}
             style={{
-              padding: '8px 16px', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap',
+              padding: '0 12px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
               background: 'transparent', border: 'none',
-              borderBottom: `2px solid ${activeTab === t.key ? C.blue : 'transparent'}`,
+              borderBottom: !isBottomCollapsed && activeTab === t.key ? `2px solid ${C.blue}` : 'none',
               color: activeTab === t.key ? C.text : C.muted,
               cursor: 'pointer', transition: 'all 0.15s',
+              height: 32,
             }}
           >
             {t.label}
           </button>
         ))}
-        {schema && (
+        {schema && !isBottomCollapsed && (
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingRight: 12, gap: 8 }}>
             <span style={{ fontSize: 8, color: C.purple, fontFamily: 'monospace' }}>
               v{schema.canonical_document?.schema_version}
@@ -293,6 +408,16 @@ export default function BottomPanel() {
               </div>
             )}
           </div>
+        )}
+        {/* ── LOGS & WARNINGS ─────────────────────────────────────────── */}
+        {activeTab === 'logs' && (
+          snapshots.ocr ? (
+            <SystemLogsView snapshots={snapshots} runs={runs} determinismOk={determinismOk} />
+          ) : (
+            <div style={{ color: C.muted, fontSize: 11, textAlign: 'center', padding: 28 }}>
+              Run the pipeline to inspect system logs and warnings
+            </div>
+          )
         )}
       </div>
     </div>

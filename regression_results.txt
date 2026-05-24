@@ -1,0 +1,220 @@
+2026-05-20 01:23:06,676 [INFO] RegressionSuite: Starting CFIS Core Regression Suite...
+2026-05-20 01:23:06,676 [INFO] RegressionSuite: ============================================================
+2026-05-20 01:23:06,677 [INFO] RegressionSuite: RUNNING CASE: multi_region_conflict_case
+2026-05-20 01:23:06,677 [INFO] RegressionSuite: DESCRIPTION:  Token spans boundary between two adjacent regions. Expect TWO AlignmentEvidence, one ConflictEdge, ONE ResolvedField owner.
+2026-05-20 01:23:06,677 [INFO] RegressionSuite: ============================================================
+2026-05-20 01:23:06,677 [INFO] app.services.pipeline.orchestration: Starting Document Compiler Pipeline for Run ID: 9ba9c302-9a4e-4612-bb56-7fcf34dd78e3
+2026-05-20 01:23:06,677 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: raw_ocr_input ---
+2026-05-20 01:23:06,677 [INFO] app.services.pipeline.stage_runner: Stage raw_ocr_input complete. Produced: 42561cefdcc0918163a1a8e5fe7afd08941dd5309fb8f40a7e11a7b7f200a6a5
+2026-05-20 01:23:06,677 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: raw_cv2_data ---
+2026-05-20 01:23:06,677 [INFO] app.services.pipeline.stage_runner: Stage raw_cv2_data complete. Produced: ac3217f1a5e04c3243c76e5aef37a9b843c968d5bbe2143a4b36d4c5270dad1a
+2026-05-20 01:23:06,677 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: ocr_adapter ---
+2026-05-20 01:23:06,679 [INFO] app.services.pipeline.stage_runner: Stage ocr_adapter complete. Produced: 1b31209433a905228f6456d2553329544f1dcd94679a33e0ba5033c0e8e0c9f8
+2026-05-20 01:23:06,679 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: geometry_adapter ---
+2026-05-20 01:23:06,679 [INFO] app.services.pipeline.stage_runner: Stage geometry_adapter complete. Produced: bc8fae3f7353202a8df38293168787253a1c7ff1f0848f51ca8669e71882c395
+2026-05-20 01:23:06,679 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: evidence_patching ---
+2026-05-20 01:23:06,679 [INFO] app.services.pipeline.stage_runner: Stage evidence_patching complete. Produced: 650dc805431444e64d8a2a9aedd338f99f598c20c9f09bd20bfa36128ba4139b
+2026-05-20 01:23:06,680 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: topology_reconstruction ---
+2026-05-20 01:23:06,680 [INFO] app.services.topology.stage: Running TopologyStage for run 9ba9c302-9a4e-4612-bb56-7fcf34dd78e3
+2026-05-20 01:23:06,680 [INFO] app.services.topology.stage: TopologyStage completed: resolved 2 tables, 5 hierarchy nodes, linked 0 checkboxes.
+2026-05-20 01:23:06,680 [INFO] app.services.pipeline.stage_runner: Stage topology_reconstruction complete. Produced: b9c878d2df93e011800e9d0ec4411039d9ec91d7e550e2b93d778f8f0299be5f
+2026-05-20 01:23:06,680 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: alignment ---
+2026-05-20 01:23:06,681 [INFO] app.services.pipeline.stage_runner: Stage alignment complete. Produced: 4029c46f314d508faba4788ef46c2743dda66fdea626303aa0d40197ae773948
+2026-05-20 01:23:06,681 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: alignment_fusion ---
+2026-05-20 01:23:06,681 [INFO] app.services.fusion.fusion_engine: Fusion complete: 2 ResolvedFields produced from 2 alignments.
+2026-05-20 01:23:06,681 [INFO] app.services.pipeline.stage_runner: Stage alignment_fusion complete. Produced: 1121dcfc30f79c420ceeac588c805bc0b7230b19d1c7e0b12cf0b51998661880
+2026-05-20 01:23:06,681 [INFO] app.services.pipeline.orchestration: Pipeline execution completed successfully.
+2026-05-20 01:23:06,681 [INFO] RegressionSuite:   [✓] Assertion PASSED: alignment_count_ge_2 - boundary_token must produce at least 2 AlignmentEvidence
+2026-05-20 01:23:06,681 [ERROR] RegressionSuite:   [x] Assertion FAILED: conflict_edge_exists - A ConflictEdge must exist between the two alignment nodes
+2026-05-20 01:23:06,681 [ERROR] RegressionSuite:       Reason: No conflict edges found between competing regions
+2026-05-20 01:23:06,681 [INFO] RegressionSuite:   [✓] Assertion PASSED: resolved_count_eq_2 - Exactly 2 ResolvedFields (one per region), not 3
+2026-05-20 01:23:06,682 [ERROR] RegressionSuite:   [x] Assertion ERROR: no_token_dropped - boundary_token stable_id appears in at least one provenance chain
+Traceback (most recent call last):
+  File "/app/scripts/run_regression_suite.py", line 139, in run_case
+    boundary_token_id = [t.stable_id for t in ocr_ev if t.text == "boundary_token"][0]
+IndexError: list index out of range
+2026-05-20 01:23:06,682 [ERROR] RegressionSuite: CASE multi_region_conflict_case: FAILED
+
+2026-05-20 01:23:06,682 [INFO] RegressionSuite: ============================================================
+2026-05-20 01:23:06,682 [INFO] RegressionSuite: RUNNING CASE: touching_boundary_case
+2026-05-20 01:23:06,682 [INFO] RegressionSuite: DESCRIPTION:  Token touches region edge without overlapping. Must classify as TOKEN_TOUCHING_REGION, not INSIDE or CROSSES.
+2026-05-20 01:23:06,682 [INFO] RegressionSuite: ============================================================
+2026-05-20 01:23:06,682 [INFO] app.services.pipeline.orchestration: Starting Document Compiler Pipeline for Run ID: 29906309-b04f-43ce-ac36-23a9417ecf76
+2026-05-20 01:23:06,682 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: raw_ocr_input ---
+2026-05-20 01:23:06,682 [INFO] app.services.pipeline.stage_runner: Stage raw_ocr_input complete. Produced: 9881826e3331d91ae17af7924e366fc8acacdf6d62ef887e114a54622786016b
+2026-05-20 01:23:06,682 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: raw_cv2_data ---
+2026-05-20 01:23:06,683 [INFO] app.services.pipeline.stage_runner: Stage raw_cv2_data complete. Produced: 5045ae394b49f0f3d180bff71bd90cd2161a7483e9acc419aab1d5d0e6429e86
+2026-05-20 01:23:06,683 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: ocr_adapter ---
+2026-05-20 01:23:06,683 [INFO] app.services.pipeline.stage_runner: Stage ocr_adapter complete. Produced: 7ab34949e2af5e82201831a72139a6d55c4ff8292092772a4e4ab71c00bab7fc
+2026-05-20 01:23:06,683 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: geometry_adapter ---
+2026-05-20 01:23:06,683 [INFO] app.services.pipeline.stage_runner: Stage geometry_adapter complete. Produced: 3024b97aed201da3e8f8a528931870c49cad72ede0611cd85794f461b01b5cf6
+2026-05-20 01:23:06,683 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: evidence_patching ---
+2026-05-20 01:23:06,683 [INFO] app.services.pipeline.stage_runner: Stage evidence_patching complete. Produced: dc90145b1cad64f8544ea60ba79036a9c366f444b9a3aef9afe3aa17e856a78a
+2026-05-20 01:23:06,683 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: topology_reconstruction ---
+2026-05-20 01:23:06,683 [INFO] app.services.topology.stage: Running TopologyStage for run 29906309-b04f-43ce-ac36-23a9417ecf76
+2026-05-20 01:23:06,684 [INFO] app.services.topology.stage: TopologyStage completed: resolved 1 tables, 4 hierarchy nodes, linked 0 checkboxes.
+2026-05-20 01:23:06,684 [INFO] app.services.pipeline.stage_runner: Stage topology_reconstruction complete. Produced: 3a6d2dc96874d7bad51a4ee3eb00bf5ee4d4a8e555805a89685f67024bb7a50f
+2026-05-20 01:23:06,684 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: alignment ---
+2026-05-20 01:23:06,684 [INFO] app.services.pipeline.stage_runner: Stage alignment complete. Produced: f7029e508c0bb11d60a8e650130189734527e5bcba7c7508b61ce2c36767edf9
+2026-05-20 01:23:06,684 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: alignment_fusion ---
+2026-05-20 01:23:06,684 [INFO] app.services.fusion.fusion_engine: Fusion complete: 1 ResolvedFields produced from 1 alignments.
+2026-05-20 01:23:06,684 [INFO] app.services.pipeline.stage_runner: Stage alignment_fusion complete. Produced: 43cf38b7b42edb7aef0c84cab2b3f705ec5f43b0f1554393fd6704e24e09ae09
+2026-05-20 01:23:06,685 [INFO] app.services.pipeline.orchestration: Pipeline execution completed successfully.
+2026-05-20 01:23:06,685 [ERROR] RegressionSuite:   [x] Assertion ERROR: touching_classified_correctly - touching_left must produce TOKEN_TOUCHING_REGION alignment
+Traceback (most recent call last):
+  File "/app/scripts/run_regression_suite.py", line 145, in run_case
+    touching_id = [t.stable_id for t in ocr_ev if t.text == "touching_left"][0]
+IndexError: list index out of range
+2026-05-20 01:23:06,685 [ERROR] RegressionSuite:   [x] Assertion ERROR: inside_classified_correctly - inside_token must produce TOKEN_INSIDE_REGION alignment
+Traceback (most recent call last):
+  File "/app/scripts/run_regression_suite.py", line 149, in run_case
+    inside_id = [t.stable_id for t in ocr_ev if t.text == "inside_token"][0]
+IndexError: list index out of range
+2026-05-20 01:23:06,685 [INFO] RegressionSuite:   [✓] Assertion PASSED: orphan_not_resolved - far_orphan must NOT appear in any ResolvedField provenance
+2026-05-20 01:23:06,685 [ERROR] RegressionSuite:   [x] Assertion ERROR: touching_lower_score - touching alignment_score < inside alignment_score
+Traceback (most recent call last):
+  File "/app/scripts/run_regression_suite.py", line 157, in run_case
+    touching_id = [t.stable_id for t in ocr_ev if t.text == "touching_left"][0]
+IndexError: list index out of range
+2026-05-20 01:23:06,685 [ERROR] RegressionSuite: CASE touching_boundary_case: FAILED
+
+2026-05-20 01:23:06,685 [INFO] RegressionSuite: ============================================================
+2026-05-20 01:23:06,685 [INFO] RegressionSuite: RUNNING CASE: merged_cells_case
+2026-05-20 01:23:06,685 [INFO] RegressionSuite: DESCRIPTION:  One large region contains multiple tokens (rowspan). All tokens preserved in one ResolvedField provenance, field not split.
+2026-05-20 01:23:06,685 [INFO] RegressionSuite: ============================================================
+2026-05-20 01:23:06,686 [INFO] app.services.pipeline.orchestration: Starting Document Compiler Pipeline for Run ID: 323aa002-cba8-4336-9a94-8c7432e9c42c
+2026-05-20 01:23:06,686 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: raw_ocr_input ---
+2026-05-20 01:23:06,686 [INFO] app.services.pipeline.stage_runner: Stage raw_ocr_input complete. Produced: fbb7f89d6acc3de961e4cb14736aa75803743db2c28f89a0c728d8d8bd536ff1
+2026-05-20 01:23:06,686 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: raw_cv2_data ---
+2026-05-20 01:23:06,686 [INFO] app.services.pipeline.stage_runner: Stage raw_cv2_data complete. Produced: 35d1021c414f8ba06c87dcfe2aedda7f3bbd20afeba2883e0f2af739f7024c69
+2026-05-20 01:23:06,686 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: ocr_adapter ---
+2026-05-20 01:23:06,686 [INFO] app.services.pipeline.stage_runner: Stage ocr_adapter complete. Produced: ded0b356dba014e19cdf62b0a4fb4a7a0a092cbfabd5cc59f4beda3b73ea55dc
+2026-05-20 01:23:06,686 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: geometry_adapter ---
+2026-05-20 01:23:06,687 [INFO] app.services.pipeline.stage_runner: Stage geometry_adapter complete. Produced: c76de42cad8e677b20554b3f97cf6a2d6bdee797fc07176d2e1e80696e2a4d60
+2026-05-20 01:23:06,687 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: evidence_patching ---
+2026-05-20 01:23:06,687 [INFO] app.services.pipeline.stage_runner: Stage evidence_patching complete. Produced: 8eaaa0606a13090d88e8d2174482dc8fb02503bab547c49eab536d2ea035db98
+2026-05-20 01:23:06,687 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: topology_reconstruction ---
+2026-05-20 01:23:06,687 [INFO] app.services.topology.stage: Running TopologyStage for run 323aa002-cba8-4336-9a94-8c7432e9c42c
+2026-05-20 01:23:06,688 [INFO] app.services.topology.stage: TopologyStage completed: resolved 1 tables, 4 hierarchy nodes, linked 0 checkboxes.
+2026-05-20 01:23:06,688 [INFO] app.services.pipeline.stage_runner: Stage topology_reconstruction complete. Produced: 5fe5dde169f33a108f9517a85eac5c12b7075bb86aa3e9fd526d9d5b9b0d38f0
+2026-05-20 01:23:06,688 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: alignment ---
+2026-05-20 01:23:06,688 [INFO] app.services.pipeline.stage_runner: Stage alignment complete. Produced: 3ca02ea0420a5b0f7c68a086e097874393a6ac3e2eaf853d7c32eae02d2dd525
+2026-05-20 01:23:06,688 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: alignment_fusion ---
+2026-05-20 01:23:06,688 [INFO] app.services.fusion.fusion_engine: Fusion complete: 1 ResolvedFields produced from 3 alignments.
+2026-05-20 01:23:06,689 [INFO] app.services.pipeline.stage_runner: Stage alignment_fusion complete. Produced: b2464a2d7567b5873eff14e6fe857771cd6a4411943c792eb890390d060b8205
+2026-05-20 01:23:06,689 [INFO] app.services.pipeline.orchestration: Pipeline execution completed successfully.
+2026-05-20 01:23:06,689 [INFO] RegressionSuite:   [✓] Assertion PASSED: single_resolved_field - Exactly 1 ResolvedField produced (not 3)
+2026-05-20 01:23:06,689 [INFO] RegressionSuite:   [✓] Assertion PASSED: all_tokens_in_provenance - All 3 token stable_ids appear in that field's provenance
+2026-05-20 01:23:06,689 [INFO] RegressionSuite:   [✓] Assertion PASSED: alignment_count_eq_3 - 3 AlignmentEvidence items (one per token→region)
+2026-05-20 01:23:06,689 [INFO] RegressionSuite: CASE merged_cells_case: SUCCESS
+
+2026-05-20 01:23:06,689 [INFO] RegressionSuite: ============================================================
+2026-05-20 01:23:06,689 [INFO] RegressionSuite: RUNNING CASE: orphan_recovery_case
+2026-05-20 01:23:06,689 [INFO] RegressionSuite: DESCRIPTION:  Two orphans: one close enough for recovery (nearest-region fallback), one too far to recover. Tests OrphanRecoveryPipeline probabilistic output.
+2026-05-20 01:23:06,689 [INFO] RegressionSuite: ============================================================
+2026-05-20 01:23:06,689 [INFO] app.services.pipeline.orchestration: Starting Document Compiler Pipeline for Run ID: f53ea2e6-4e0a-4346-b129-11d5f46fccbd
+2026-05-20 01:23:06,689 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: raw_ocr_input ---
+2026-05-20 01:23:06,690 [INFO] app.services.pipeline.stage_runner: Stage raw_ocr_input complete. Produced: 2ebca5bbb064ccd55a713f2ca889d7ca30fca1adbd178c8037f5fba612fc343f
+2026-05-20 01:23:06,690 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: raw_cv2_data ---
+2026-05-20 01:23:06,690 [INFO] app.services.pipeline.stage_runner: Stage raw_cv2_data complete. Produced: 5045ae394b49f0f3d180bff71bd90cd2161a7483e9acc419aab1d5d0e6429e86
+2026-05-20 01:23:06,690 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: ocr_adapter ---
+2026-05-20 01:23:06,690 [INFO] app.services.pipeline.stage_runner: Stage ocr_adapter complete. Produced: e5617ffb57cfe40d386a976be4e7d8b947823519e4706e0acc44eb0876d18b9f
+2026-05-20 01:23:06,690 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: geometry_adapter ---
+2026-05-20 01:23:06,690 [INFO] app.services.pipeline.stage_runner: Stage geometry_adapter complete. Produced: 3024b97aed201da3e8f8a528931870c49cad72ede0611cd85794f461b01b5cf6
+2026-05-20 01:23:06,690 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: evidence_patching ---
+2026-05-20 01:23:06,691 [INFO] app.services.pipeline.stage_runner: Stage evidence_patching complete. Produced: 585a3f97aef31aa5123fe536657ecb2cbae8ebdc7966633a58be58f908b5dcda
+2026-05-20 01:23:06,691 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: topology_reconstruction ---
+2026-05-20 01:23:06,691 [INFO] app.services.topology.stage: Running TopologyStage for run f53ea2e6-4e0a-4346-b129-11d5f46fccbd
+2026-05-20 01:23:06,691 [INFO] app.services.topology.stage: TopologyStage completed: resolved 1 tables, 4 hierarchy nodes, linked 0 checkboxes.
+2026-05-20 01:23:06,691 [INFO] app.services.pipeline.stage_runner: Stage topology_reconstruction complete. Produced: 3a6d2dc96874d7bad51a4ee3eb00bf5ee4d4a8e555805a89685f67024bb7a50f
+2026-05-20 01:23:06,691 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: alignment ---
+2026-05-20 01:23:06,692 [INFO] app.services.pipeline.stage_runner: Stage alignment complete. Produced: 05283b84f42e1e5a172feb93a582f6512dd102535700de606d58016ab6aa6207
+2026-05-20 01:23:06,692 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: alignment_fusion ---
+2026-05-20 01:23:06,692 [INFO] app.services.fusion.fusion_engine: Fusion complete: 1 ResolvedFields produced from 2 alignments.
+2026-05-20 01:23:06,692 [INFO] app.services.pipeline.stage_runner: Stage alignment_fusion complete. Produced: 74d4a6478690d2a1cd92ff6875041e0c5e6e26660efe051e9272800003e3112f
+2026-05-20 01:23:06,692 [INFO] app.services.pipeline.orchestration: Pipeline execution completed successfully.
+2026-05-20 01:23:06,692 [INFO] RegressionSuite:   [✓] Assertion PASSED: close_orphan_recovered - close_orphan must appear in some ResolvedField provenance
+2026-05-20 01:23:06,693 [INFO] RegressionSuite:   [✓] Assertion PASSED: distant_orphan_stays_orphan - distant_orphan must NOT appear in any ResolvedField
+2026-05-20 01:23:06,693 [INFO] RegressionSuite:   [✓] Assertion PASSED: recovery_is_probabilistic - close_orphan alignment_score < inside_token alignment_score
+2026-05-20 01:23:06,693 [INFO] RegressionSuite: CASE orphan_recovery_case: SUCCESS
+
+2026-05-20 01:23:06,693 [INFO] RegressionSuite: ============================================================
+2026-05-20 01:23:06,693 [INFO] RegressionSuite: RUNNING CASE: geometry_conflict_case
+2026-05-20 01:23:06,693 [INFO] RegressionSuite: DESCRIPTION:  Legacy clustering says 'paragraph', visual geometry says 'table_cell'. ConflictEdge must exist. Fusion picks higher-confidence side. Provenance must show the conflict source.
+2026-05-20 01:23:06,693 [INFO] RegressionSuite: ============================================================
+2026-05-20 01:23:06,693 [INFO] app.services.pipeline.orchestration: Starting Document Compiler Pipeline for Run ID: db35f3b0-9d51-40c6-8efd-cc1ff07c0f64
+2026-05-20 01:23:06,693 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: raw_ocr_input ---
+2026-05-20 01:23:06,693 [INFO] app.services.pipeline.stage_runner: Stage raw_ocr_input complete. Produced: 12458e97c10b91a2d025714f044ccfd33485c153635017affd74b9fe66ce73d1
+2026-05-20 01:23:06,693 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: raw_cv2_data ---
+2026-05-20 01:23:06,694 [INFO] app.services.pipeline.stage_runner: Stage raw_cv2_data complete. Produced: c21d30a3ab8720fb00ca0593da8e9b1dc6424b993464ab66f141e99c76414fc5
+2026-05-20 01:23:06,694 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: ocr_adapter ---
+2026-05-20 01:23:06,694 [INFO] app.services.pipeline.stage_runner: Stage ocr_adapter complete. Produced: 7a724f036d5b343ab38648d809354059f02839675080ae8affe9de8b0838a303
+2026-05-20 01:23:06,694 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: geometry_adapter ---
+2026-05-20 01:23:06,694 [INFO] app.services.pipeline.stage_runner: Stage geometry_adapter complete. Produced: 0ccc44fc839c96e8bade1bd9e62b73062a27a4a41d7d968f8d5bf2393494889b
+2026-05-20 01:23:06,694 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: evidence_patching ---
+2026-05-20 01:23:06,694 [INFO] app.services.pipeline.stage_runner: Stage evidence_patching complete. Produced: a75f372ab68ad0a5bca5fc056cfd54ec695590cd62c43dda11ea1deb833059d9
+2026-05-20 01:23:06,694 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: topology_reconstruction ---
+2026-05-20 01:23:06,694 [INFO] app.services.topology.stage: Running TopologyStage for run db35f3b0-9d51-40c6-8efd-cc1ff07c0f64
+2026-05-20 01:23:06,695 [INFO] app.services.topology.stage: TopologyStage completed: resolved 2 tables, 5 hierarchy nodes, linked 0 checkboxes.
+2026-05-20 01:23:06,695 [INFO] app.services.pipeline.stage_runner: Stage topology_reconstruction complete. Produced: 58af1d04af8186c6957d9359c36d1150406fa8d0e6057bc69b3abdc61516d356
+2026-05-20 01:23:06,695 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: alignment ---
+2026-05-20 01:23:06,695 [INFO] app.services.pipeline.stage_runner: Stage alignment complete. Produced: d0358bb2e51d0f053cdde89c343e17400ae3934513b25ee8db7a82c8a8080d09
+2026-05-20 01:23:06,696 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: alignment_fusion ---
+2026-05-20 01:23:06,696 [INFO] app.services.fusion.fusion_engine: Fusion complete: 2 ResolvedFields produced from 2 alignments.
+2026-05-20 01:23:06,696 [INFO] app.services.pipeline.stage_runner: Stage alignment_fusion complete. Produced: 7ae4add4b50dc25b9274e92d2edadd43bafd0fcb3278070cdd67e5dc2d9a3b1d
+2026-05-20 01:23:06,696 [INFO] app.services.pipeline.orchestration: Pipeline execution completed successfully.
+2026-05-20 01:23:06,696 [ERROR] RegressionSuite:   [x] Assertion FAILED: conflict_edge_exists - ConflictEdge must exist between competing regions
+2026-05-20 01:23:06,696 [ERROR] RegressionSuite:       Reason: No conflict edges found between competing regions
+2026-05-20 01:23:06,696 [INFO] RegressionSuite:   [✓] Assertion PASSED: high_conf_region_wins - ResolvedField references the high-confidence region
+2026-05-20 01:23:06,696 [ERROR] RegressionSuite:   [x] Assertion FAILED: conflict_in_provenance - conflict_penalty > 0 in winning ResolvedField breakdown
+2026-05-20 01:23:06,697 [ERROR] RegressionSuite:       Reason: No conflict penalty found in resolved fields breakdown
+2026-05-20 01:23:06,697 [ERROR] RegressionSuite: CASE geometry_conflict_case: FAILED
+
+2026-05-20 01:23:06,697 [INFO] RegressionSuite: ============================================================
+2026-05-20 01:23:06,697 [INFO] RegressionSuite: RUNNING CASE: human_override_case
+2026-05-20 01:23:06,697 [INFO] RegressionSuite: DESCRIPTION:  After initial Fusion, a HITL correction injects HumanCorrectionEvidence. Re-fusion must produce a different (overridden) ResolvedField deterministically.
+2026-05-20 01:23:06,697 [INFO] RegressionSuite: ============================================================
+2026-05-20 01:23:06,697 [INFO] app.services.pipeline.orchestration: Starting Document Compiler Pipeline for Run ID: dc3531fa-fc36-4888-902d-5877fa034476
+2026-05-20 01:23:06,697 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: raw_ocr_input ---
+2026-05-20 01:23:06,697 [INFO] app.services.pipeline.stage_runner: Stage raw_ocr_input complete. Produced: 77cdce03b4a59375dc5525e235c47e016ffa6569cadfe8888e84c219aafa7303
+2026-05-20 01:23:06,697 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: raw_cv2_data ---
+2026-05-20 01:23:06,697 [INFO] app.services.pipeline.stage_runner: Stage raw_cv2_data complete. Produced: 5045ae394b49f0f3d180bff71bd90cd2161a7483e9acc419aab1d5d0e6429e86
+2026-05-20 01:23:06,697 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: ocr_adapter ---
+2026-05-20 01:23:06,698 [INFO] app.services.pipeline.stage_runner: Stage ocr_adapter complete. Produced: 6c88cb4c67acf22491807be9e0906f10ed723a156a5496f18622b3b0843fafb2
+2026-05-20 01:23:06,698 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: geometry_adapter ---
+2026-05-20 01:23:06,698 [INFO] app.services.pipeline.stage_runner: Stage geometry_adapter complete. Produced: 3024b97aed201da3e8f8a528931870c49cad72ede0611cd85794f461b01b5cf6
+2026-05-20 01:23:06,698 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: evidence_patching ---
+2026-05-20 01:23:06,698 [INFO] app.services.pipeline.stage_runner: Stage evidence_patching complete. Produced: dfec474abf3a119f35ee73d12710722a6dd357eaac5f6a0870cb1bf49a80d2d7
+2026-05-20 01:23:06,698 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: topology_reconstruction ---
+2026-05-20 01:23:06,698 [INFO] app.services.topology.stage: Running TopologyStage for run dc3531fa-fc36-4888-902d-5877fa034476
+2026-05-20 01:23:06,699 [INFO] app.services.topology.stage: TopologyStage completed: resolved 1 tables, 4 hierarchy nodes, linked 0 checkboxes.
+2026-05-20 01:23:06,699 [INFO] app.services.pipeline.stage_runner: Stage topology_reconstruction complete. Produced: 3a6d2dc96874d7bad51a4ee3eb00bf5ee4d4a8e555805a89685f67024bb7a50f
+2026-05-20 01:23:06,699 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: alignment ---
+2026-05-20 01:23:06,699 [INFO] app.services.pipeline.stage_runner: Stage alignment complete. Produced: 9290d2c871b01060035854e52976475bfc3db833f2e8442307f4db0809509286
+2026-05-20 01:23:06,699 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: alignment_fusion ---
+2026-05-20 01:23:06,699 [INFO] app.services.fusion.fusion_engine: Fusion complete: 1 ResolvedFields produced from 1 alignments.
+2026-05-20 01:23:06,699 [INFO] app.services.pipeline.stage_runner: Stage alignment_fusion complete. Produced: be0cf16fc0b47bd8db8d9257bf4fa5a27f6520ec2e3ddc7a905e1959dc9788bb
+2026-05-20 01:23:06,699 [INFO] app.services.pipeline.orchestration: Pipeline execution completed successfully.
+2026-05-20 01:23:06,700 [INFO] RegressionSuite: Initial run completed. First field ID=094dd2353c9ea6595121051575dcdf33dbf04861133a7db94c8b91479f56d3fe, target_region=8349f809c4b6, value=None
+2026-05-20 01:23:06,700 [INFO] app.services.hitl.operations_ledger: Ledger: appended relabel by test_operator for run dc3531fa-fc36-4888-902d-5877fa034476
+2026-05-20 01:23:06,700 [INFO] app.services.pipeline.orchestration: Re-running pipeline from stage: evidence_patching
+2026-05-20 01:23:06,700 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: evidence_patching ---
+2026-05-20 01:23:06,700 [INFO] app.services.hitl.evidence_patcher: EvidencePatchStage: Applied 1 operations to run dc3531fa-fc36-4888-902d-5877fa034476
+2026-05-20 01:23:06,700 [INFO] app.services.pipeline.stage_runner: Stage evidence_patching complete. Produced: 680e10fc35d3ed6ff66dabf255f94e5c24048c2276f538d88214bc2b31e3245d
+2026-05-20 01:23:06,700 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: topology_reconstruction ---
+2026-05-20 01:23:06,700 [INFO] app.services.topology.stage: Running TopologyStage for run dc3531fa-fc36-4888-902d-5877fa034476
+2026-05-20 01:23:06,701 [INFO] app.services.topology.stage: TopologyStage completed: resolved 1 tables, 4 hierarchy nodes, linked 0 checkboxes.
+2026-05-20 01:23:06,701 [INFO] app.services.pipeline.stage_runner: Stage topology_reconstruction complete. Produced: b02fa82d40c0a3f55ffc3a25e83e42c186bd898ba2300c96db696dbec2368319
+2026-05-20 01:23:06,701 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: alignment ---
+2026-05-20 01:23:06,701 [INFO] app.services.pipeline.stage_runner: Stage alignment complete. Produced: 853c07667b452671fb4b357672f1f8acb20ae81f6be28f7f878ca7b4a558d740
+2026-05-20 01:23:06,701 [INFO] app.services.pipeline.stage_runner: --- Running Pipeline Stage: alignment_fusion ---
+2026-05-20 01:23:06,701 [INFO] app.services.fusion.fusion_engine: Fusion complete: 1 ResolvedFields produced from 1 alignments.
+2026-05-20 01:23:06,701 [INFO] app.services.pipeline.stage_runner: Stage alignment_fusion complete. Produced: 0469e8751a900b870b2073f1417dd0a015da80c33eb0f6575a17d0b2caf105be
+2026-05-20 01:23:06,701 [INFO] RegressionSuite:   [✓] Assertion PASSED: override_changes_value - ResolvedField value changes after human correction
+2026-05-20 01:23:06,701 [INFO] RegressionSuite:   [✓] Assertion PASSED: human_in_provenance - human_operations list is non-empty in corrected field
+2026-05-20 01:23:06,701 [INFO] RegressionSuite:   [✓] Assertion PASSED: override_is_deterministic - Two reruns with same correction produce identical IDs
+2026-05-20 01:23:06,701 [INFO] RegressionSuite: CASE human_override_case: SUCCESS
+
+2026-05-20 01:23:06,702 [INFO] RegressionSuite: ============================================================
+2026-05-20 01:23:06,702 [INFO] RegressionSuite: REGRESSION SUITE COMPLETED: 3/6 CASES PASSED
+2026-05-20 01:23:06,702 [INFO] RegressionSuite: ============================================================

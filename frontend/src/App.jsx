@@ -113,23 +113,25 @@ const App = () => {
       {/* ── Main content ─────────────────────────────────────────────── */}
       <main className="flex-1 overflow-auto">
         {/* Top bar */}
-        <header className="sticky top-0 z-10 px-8 py-4 flex items-center justify-between"
-          style={{ background: 'var(--bg-primary)', borderBottom: '1px solid var(--border)' }}>
-          <div>
-            <h1 className="font-bold text-lg">{current.label}</h1>
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{current.desc}</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="text-xs px-3 py-1.5 rounded-lg font-mono"
-              style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-              pgvector · nomic-embed-text · rq
+        {view !== 'workbench' && (
+          <header className="sticky top-0 z-10 px-8 py-4 flex items-center justify-between"
+            style={{ background: 'var(--bg-primary)', borderBottom: '1px solid var(--border)' }}>
+            <div>
+              <h1 className="font-bold text-lg">{current.label}</h1>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{current.desc}</p>
             </div>
-            <StatusDot online={online} />
-          </div>
-        </header>
+            <div className="flex items-center gap-3">
+              <div className="text-xs px-3 py-1.5 rounded-lg font-mono"
+                style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+                pgvector · nomic-embed-text · rq
+              </div>
+              <StatusDot online={online} />
+            </div>
+          </header>
+        )}
 
         {/* View router */}
-        <div className={view === 'workbench' ? '' : 'p-8'} style={view === 'workbench' ? {height: 'calc(100vh - 73px)'} : {}}>
+        <div className={view === 'workbench' ? '' : 'p-8'} style={view === 'workbench' ? {height: '100vh'} : {}}>
           {view === 'pdf'        && <PDFProcessor />}
           {view === 'geodebug'   && <GeometryDebugViewer />}
           {view === 'workbench'  && <EvidenceWorkbench />}

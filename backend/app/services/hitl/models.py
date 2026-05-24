@@ -58,3 +58,10 @@ class HumanCheckboxCorrection(HumanOperation):
     region_id: str
     new_state: bool
 
+
+class HumanRelabelCorrection(HumanOperation):
+    operation_type: Literal["relabel"] = "relabel"
+    region_id: str
+    new_value: str
+
+
