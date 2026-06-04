@@ -44,16 +44,27 @@ def get_reader():
 # ─── Embedding ────────────────────────────────────────────────────────────────
 
 async def get_embedding(text: str) -> list[float]:
-    """Get vector embedding from Ollama."""
+    """Get vector embedding from Ollama/LM Studio."""
+    base_url = OLLAMA_BASE_URL.rstrip('/')
+    is_openai = "/v1" in base_url or "1234" in base_url
+    
+    if is_openai:
+        url = f"{base_url}/embeddings" if "/v1" in base_url else f"{base_url}/v1/embeddings"
+        payload = {"model": EMBED_MODEL, "input": text[:MAX_CHARS]}
+    else:
+        url = f"{base_url}/api/embeddings"
+        payload = {"model": EMBED_MODEL, "prompt": text[:MAX_CHARS]}
+        
     async with httpx.AsyncClient(timeout=60.0) as client:
         for attempt in range(3):
             try:
-                response = await client.post(
-                    f"{OLLAMA_BASE_URL}/api/embeddings",
-                    json={"model": EMBED_MODEL, "prompt": text[:MAX_CHARS]}
-                )
+                response = await client.post(url, json=payload)
                 response.raise_for_status()
-                return response.json()["embedding"]
+                res_data = response.json()
+                if is_openai:
+                    return res_data["data"][0]["embedding"]
+                else:
+                    return res_data["embedding"]
             except Exception as e:
                 if attempt == 2: raise e
                 await asyncio.sleep(1)

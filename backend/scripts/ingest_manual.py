@@ -22,14 +22,25 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
 EMBED_MODEL = "nomic-embed-text"
 
 async def get_embedding(text: str) -> List[float]:
-    """Fetch embedding from local Ollama instance."""
-    url = f"{OLLAMA_BASE_URL.rstrip('/')}/api/embeddings"
-    payload = {"model": EMBED_MODEL, "prompt": text}
+    """Fetch embedding from local Ollama/LM Studio instance."""
+    base_url = OLLAMA_BASE_URL.rstrip('/')
+    is_openai = "/v1" in base_url or "1234" in base_url
     
+    if is_openai:
+        url = f"{base_url}/embeddings" if "/v1" in base_url else f"{base_url}/v1/embeddings"
+        payload = {"model": EMBED_MODEL, "input": text}
+    else:
+        url = f"{base_url}/api/embeddings"
+        payload = {"model": EMBED_MODEL, "prompt": text}
+        
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(url, json=payload)
         response.raise_for_status()
-        return response.json()["embedding"]
+        res_data = response.json()
+        if is_openai:
+            return res_data["data"][0]["embedding"]
+        else:
+            return res_data["embedding"]
 
 async def ingest_markdown_manual(file_path: str):
     if not os.path.exists(file_path):

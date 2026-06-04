@@ -65,3 +65,29 @@ class HumanRelabelCorrection(HumanOperation):
     new_value: str
 
 
+class HumanZoneOperation(HumanOperation):
+    operation_type: Literal["zone_operation"] = "zone_operation"
+    zone_op_type: Literal[
+        "CREATE_ZONE",
+        "DELETE_ZONE",
+        "RESIZE_ZONE",
+        "RENAME_ZONE",
+        "SET_FORM_TITLE",   # marks zone as the form's name source
+        "TOGGLE_INCLUDE",  # toggles include_in_form on the zone
+    ]
+    target_zone_id: str
+    parameters: Dict[str, Any] = {}
+
+
+class HumanFieldTypeCorrection(HumanOperation):
+    """
+    Human correction of a field's detected type within a zone.
+    Stored in the HITL ledger and applied during schema export.
+    """
+    operation_type: Literal["field_type_correction"] = "field_type_correction"
+    zone_id: str
+    field_id: str
+    corrected_type: str   # FieldType enum value string
+    corrected_label: str = ""
+
+

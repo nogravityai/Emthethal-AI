@@ -81,33 +81,25 @@ def _is_page_visually_encoded(words: List[dict]) -> bool:
 
 def _fix_arabic_text(text: str, is_reversed: bool = False) -> str:
     """
-    Fix Arabic text extracted from visually-encoded PDFs.
+    Fix Arabic text extracted from visually-encoded PDFs or OCR outputs.
     """
     if not is_reversed and not _has_arabic_presentation_forms(text):
-        return text  # Normal PDF — do not touch
+        return text  # Normal text / PDF — do not touch
 
-    # Step 1: Normalize presentation forms to base characters
+    # Normalize presentation forms to base characters
     normalized = unicodedata.normalize('NFKC', text)
 
-    # Step 2: Reverse visual text to logical text
-    try:
-        from bidi.algorithm import get_display
-        # get_display is an involution for RTL: passing visual LTR returns logical RTL
-        return get_display(normalized)
-    except ImportError:
-        # Fallback to simple word reversal if python-bidi is missing
-        parts = normalized.split(' ')
-        fixed = []
-        for part in parts:
-            if not part:
-                fixed.append(part)
-                continue
-            arabic_count = sum(1 for c in part if '\u0600' <= c <= '\u06FF')
-            if arabic_count / max(len(part), 1) > 0.3:
-                fixed.append(part[::-1])
-            else:
-                fixed.append(part)  # English/numeric segment — keep as-is
-        return ' '.join(fixed)
+    if is_reversed:
+        # Reverse the entire string character-by-character
+        reversed_text = normalized[::-1]
+        
+        # Restore Latin text and numbers to LTR order
+        import re
+        pattern = re.compile(r'[a-zA-Z0-9\-\.\,:\+\*\/%=\$#@!\(\)\{\}\[\]]+')
+        return pattern.sub(lambda m: m.group(0)[::-1], reversed_text)
+    
+    # If not fully reversed but contains presentation forms, just return normalized
+    return normalized
 
 # Minimum character count to consider a page as having native text
 NATIVE_TEXT_MIN_CHARS = 20
@@ -131,21 +123,40 @@ def _get_ocr_engine(language: str = "arabic") -> object:
 
     try:
         from paddleocr import PaddleOCR
-        cfg = dict(
-            use_angle_cls=True,
-            use_gpu=False,
-            enable_mkldnn=True,
-            rec_batch_num=6,
-            show_log=False,
-            det_db_score_mode="slow",   # better for dense Arabic text
-        )
-        # Arabic is default; only use English model if explicitly forced
-        cfg["lang"] = "ar" if language in ("ar", "arabic", "ar_en", "mixed") else "en"
-        logger.info(f"Loading OCR engine: lang={cfg['lang']}")
-        return PaddleOCR(**cfg)
     except ImportError:
         logger.warning("paddleocr not available — OCR disabled")
         return None
+
+    try:
+        import importlib.metadata
+        ver = importlib.metadata.version("paddleocr")
+    except Exception:
+        ver = "2.x"
+
+    try:
+        lang = "ar" if language in ("ar", "arabic", "ar_en", "mixed") else "en"
+        logger.info(f"Loading OCR engine: lang={lang} (detected paddleocr version: {ver})")
+
+        if ver.startswith("3."):
+            # PaddleOCR 3.x configuration
+            cfg = dict(
+                lang=lang,
+                use_textline_orientation=False,
+                device="cpu",
+                enable_mkldnn=False,
+            )
+        else:
+            # Legacy PaddleOCR 2.x configuration
+            cfg = dict(
+                lang=lang,
+                use_angle_cls=False,
+                use_gpu=False,
+                enable_mkldnn=False,
+                rec_batch_num=6,
+                show_log=False,
+                det_db_score_mode="slow",   # better for dense Arabic text
+            )
+        return PaddleOCR(**cfg)
     except Exception as e:
         logger.error(f"OCR engine init failed: {e}")
         return None

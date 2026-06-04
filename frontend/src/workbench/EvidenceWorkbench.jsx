@@ -78,7 +78,10 @@ export default function EvidenceWorkbench() {
     resetWorkbench,
     workspaceMode, isLeftCollapsed, isRightCollapsed,
     setLeftCollapsed, setRightCollapsed,
+    // ── Smart Calibration ──
+    smartCalibrationEnabled, toggleSmartCalibration, setCalibrationVector,
   } = useWorkbenchStore();
+
 
   const fileRef = useRef();
 
@@ -173,6 +176,27 @@ export default function EvidenceWorkbench() {
     return () => { delete window.__cfisHitl; };
   }, [handleHitlOperation]);
 
+  // ── Smart Calibration ─────────────────────────────────────────────────
+  // Called by DocumentViewer canvas when the user finishes dragging a zone.
+  // Dispatches a CALIBRATE_COORDINATES HITL op so the backend drift is recorded
+  // in the immutable audit ledger and applied on the next /hitl/rerun.
+  const handleSmartCalibration = useCallback(async ({ zone_id, dx, dy, anchor_word_ids = [] }) => {
+    if (!smartCalibrationEnabled || !runId) return;
+    // Cache the vector locally so the canvas can render the drift arrow immediately
+    setCalibrationVector(zone_id, { dx, dy, anchor_word_ids });
+    // Submit to backend ledger
+    await handleHitlOperation({
+      operation_type: 'CALIBRATE_COORDINATES',
+      target_evidence_ids: [zone_id],
+      payload: { zone_id, dx, dy, anchor_word_ids },
+    });
+  }, [smartCalibrationEnabled, runId, setCalibrationVector, handleHitlOperation]);
+
+  useEffect(() => {
+    window.__cfisCalibrate = handleSmartCalibration;
+    return () => { delete window.__cfisCalibrate; };
+  }, [handleSmartCalibration]);
+
   return (
     <div
       style={{
@@ -191,6 +215,88 @@ export default function EvidenceWorkbench() {
         onRunDemo={handleRunDemo}
         onUploadClick={() => fileRef.current?.click()}
       />
+
+      {/* ── SMART CALIBRATION BAR ─────────────────────────────────── */}
+      <div
+        id="cfis-calibration-bar"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '4px 14px',
+          background: smartCalibrationEnabled
+            ? 'linear-gradient(90deg,#052814 0%,#071a0e 100%)'
+            : '#080E1A',
+          borderBottom: smartCalibrationEnabled
+            ? '1px solid rgba(16,185,129,0.35)'
+            : '1px solid #0E1829',
+          transition: 'background 0.3s, border-color 0.3s',
+          minHeight: 30,
+          flexShrink: 0,
+        }}
+      >
+        {/* Toggle button */}
+        <button
+          id="cfis-smart-calibration-toggle"
+          onClick={toggleSmartCalibration}
+          title={smartCalibrationEnabled
+            ? 'Smart Calibration ON — zone edits will write CALIBRATE_COORDINATES to ledger'
+            : 'Enable Smart Calibration to record zone drift corrections'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '3px 10px',
+            borderRadius: 20,
+            border: `1px solid ${smartCalibrationEnabled ? '#10B981' : '#1E293B'}`,
+            background: smartCalibrationEnabled
+              ? 'rgba(16,185,129,0.15)'
+              : 'rgba(30,41,59,0.5)',
+            color: smartCalibrationEnabled ? '#10B981' : '#64748B',
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: 'pointer',
+            letterSpacing: '0.04em',
+            transition: 'all 0.2s',
+          }}
+        >
+          {/* Animated dot */}
+          <span style={{
+            width: 7, height: 7,
+            borderRadius: '50%',
+            background: smartCalibrationEnabled ? '#10B981' : '#334155',
+            boxShadow: smartCalibrationEnabled ? '0 0 6px #10B981' : 'none',
+            transition: 'all 0.3s',
+            animation: smartCalibrationEnabled ? 'cfis-pulse 1.5s ease-in-out infinite' : 'none',
+          }} />
+          SMART CALIBRATION
+        </button>
+
+        {/* Status hint */}
+        {smartCalibrationEnabled && (
+          <span style={{ color: '#34D399', fontSize: 10, letterSpacing: '0.06em', opacity: 0.8 }}>
+            ✦ Drag a zone to record coordinate drift &rarr; HITL Ledger
+          </span>
+        )}
+
+        <div style={{ flex: 1 }} />
+
+        {/* Drift indicator — shows count of calibrated zones */}
+        {smartCalibrationEnabled && (
+          <span
+            id="cfis-calibration-count"
+            style={{
+              fontSize: 10,
+              color: '#10B981',
+              fontFamily: 'monospace',
+              letterSpacing: '0.05em',
+              opacity: 0.7,
+            }}
+          >
+            ENGINE: SmartZoneDiscoveryEngine · MODE: ANCHOR_CALIBRATION
+          </span>
+        )}
+      </div>
 
       <input
         ref={fileRef}
@@ -300,6 +406,10 @@ export default function EvidenceWorkbench() {
 
       <style>{`
         @keyframes cfis-spin { to { transform: rotate(360deg); } }
+        @keyframes cfis-pulse {
+          0%, 100% { opacity: 1; box-shadow: 0 0 6px #10B981; }
+          50%       { opacity: 0.5; box-shadow: 0 0 12px #10B981; }
+        }
         * { box-sizing: border-box; }
         ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-track { background: #05080F; }

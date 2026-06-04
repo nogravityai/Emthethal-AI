@@ -67,7 +67,7 @@ export const pipelineService = {
 
   /**
    * GET /v3/pipeline/export/{run_id}
-   * Returns: { canonical_document, formio_schema }
+   * Returns: { canonical_document, formio_schema, erpnext_schema }
    */
   getExport: async (run_id) => {
     const { data } = await API.get(`${V3_PIPELINE}/export/${run_id}`);
@@ -102,12 +102,24 @@ export const pipelineService = {
  * These are the ONLY valid operation_type values.
  */
 export const HITL_OP_TYPES = {
-  LINE_REJECTION: 'line_rejection',       // HumanLineRejection
-  LINE_APPROVAL: 'line_approval',         // HumanLineApproval
-  REGION_MERGE: 'region_merge',          // HumanRegionMerge — needs source_regions[]
-  REGION_SPLIT: 'region_split',          // HumanRegionSplit — needs split_coordinates{}
-  TOKEN_REASSIGNMENT: 'token_reassignment',    // HumanTokenReassignment — needs token_id + new_region_id
-  CHECKBOX_CORRECTION: 'checkbox_correction',   // HumanCheckboxCorrection — needs region_id + new_state
+  LINE_REJECTION:       'line_rejection',       // HumanLineRejection
+  LINE_APPROVAL:        'line_approval',         // HumanLineApproval
+  REGION_MERGE:         'region_merge',          // HumanRegionMerge
+  REGION_SPLIT:         'region_split',          // HumanRegionSplit
+  TOKEN_REASSIGNMENT:   'token_reassignment',    // HumanTokenReassignment
+  CHECKBOX_CORRECTION:  'checkbox_correction',   // HumanCheckboxCorrection
+  ZONE_OPERATION:       'zone_operation',        // HumanZoneOperation
+  FIELD_TYPE_CORRECTION: 'field_type_correction', // HumanFieldTypeCorrection
+};
+
+// Zone operation subtypes (used in payload.zone_op_type)
+export const ZONE_OP_TYPES = {
+  CREATE_ZONE:    'CREATE_ZONE',
+  DELETE_ZONE:    'DELETE_ZONE',
+  RESIZE_ZONE:    'RESIZE_ZONE',
+  RENAME_ZONE:    'RENAME_ZONE',
+  SET_FORM_TITLE: 'SET_FORM_TITLE',  // ← new: mark as form name
+  TOGGLE_INCLUDE: 'TOGGLE_INCLUDE',  // ← new: include/exclude from export
 };
 
 export const hitlService = {
@@ -232,6 +244,20 @@ export async function submitHitlAndRerun({ operation_type, run_id, operator_id, 
     timeline: timeline.status === 'fulfilled' ? timeline.value : null,
     schema: schema.status === 'fulfilled' ? schema.value : null,
   };
+}
+
+/**
+ * Download a schema artifact as a JSON file.
+ * @param {Object} schema  - The schema object (canonical/formio/erpnext)
+ * @param {string} filename - The download filename
+ */
+export function downloadSchema(schema, filename) {
+  const blob = new Blob([JSON.stringify(schema, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename || `cfis_export_${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 /**

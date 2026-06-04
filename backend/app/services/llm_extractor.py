@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
-MODEL_NAME = "llama3:8b-instruct-q4_K_M"
+MODEL_NAME = os.getenv("LLM_MODEL", "llama3:8b-instruct-q4_K_M")
 
 # ─── Prompt ───────────────────────────────────────────────────────────────────
 
@@ -167,31 +167,57 @@ def _ensure_unique_keys(data: dict) -> dict:
 
 class LLMExtractor:
     def __init__(self, base_url: str = OLLAMA_BASE_URL):
-        self.api_url = f"{base_url.rstrip('/')}/api/generate"
+        self.base_url = base_url.rstrip('/')
+        if "/v1" in self.base_url or "1234" in self.base_url:
+            self.is_openai = True
+            if "/v1" not in self.base_url:
+                self.api_url = f"{self.base_url}/v1/chat/completions"
+            else:
+                self.api_url = f"{self.base_url}/chat/completions"
+        else:
+            self.is_openai = False
+            self.api_url = f"{self.base_url}/api/generate"
 
     async def generate_checklist(
         self, device_name: str, department_name: str, raw_text: str = ""
     ) -> Dict[str, Any]:
 
-        payload = {
-            "model": MODEL_NAME,
-            "system": build_system_prompt(device_name, department_name),
-            "prompt": build_user_prompt(device_name, department_name, raw_text[:3500]),
-            "stream": False,
-            "format": "json",
-            "options": {
-                "num_ctx": 8192,
-                "temperature": 0.1,   # low temperature = more deterministic/faithful
-                "num_predict": 4096,  # allow longer output for comprehensive lists
-            },
-        }
+        if self.is_openai:
+            payload = {
+                "model": MODEL_NAME,
+                "messages": [
+                    {"role": "system", "content": build_system_prompt(device_name, department_name)},
+                    {"role": "user", "content": build_user_prompt(device_name, department_name, raw_text[:3500])}
+                ],
+                "stream": False,
+                "response_format": {"type": "json_object"},
+                "temperature": 0.1,
+                "max_tokens": 4096,
+            }
+        else:
+            payload = {
+                "model": MODEL_NAME,
+                "system": build_system_prompt(device_name, department_name),
+                "prompt": build_user_prompt(device_name, department_name, raw_text[:3500]),
+                "stream": False,
+                "format": "json",
+                "options": {
+                    "num_ctx": 8192,
+                    "temperature": 0.1,
+                    "num_predict": 4096,
+                },
+            }
 
         logger.info(f"Generating checklist: device='{device_name}' dept='{department_name}' context={len(raw_text)} chars")
 
         async with httpx.AsyncClient(timeout=180.0) as client:
             response = await client.post(self.api_url, json=payload)
             response.raise_for_status()
-            raw = response.json().get("response", "{}")
+            res_data = response.json()
+            if self.is_openai:
+                raw = res_data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+            else:
+                raw = res_data.get("response", "{}")
 
         try:
             data = json.loads(raw)

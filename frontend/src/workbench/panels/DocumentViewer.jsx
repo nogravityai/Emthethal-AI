@@ -23,9 +23,9 @@ const C = {
 
 // AlignmentType → color mapping (matches backend AlignmentType enum)
 const ALIGNMENT_COLORS = {
-  [ALIGNMENT_TYPES.TOKEN_INSIDE_REGION]:    C.green,
+  [ALIGNMENT_TYPES.TOKEN_INSIDE_REGION]: C.green,
   [ALIGNMENT_TYPES.TOKEN_CROSSES_BOUNDARY]: C.red,
-  [ALIGNMENT_TYPES.TOKEN_TOUCHING_REGION]:  C.yellow,
+  [ALIGNMENT_TYPES.TOKEN_TOUCHING_REGION]: C.yellow,
 };
 
 const MAX_DISPLAY_W = 860;
@@ -34,13 +34,73 @@ export default function DocumentViewer() {
   const {
     runId, snapshots, layers, selected, setSelected,
     pageImage, pageW, pageH, zoom, panOffset, setPan,
-    layerOpacities, layerRenderModes, irLevel,
+    layerOpacities, layerRenderModes,
     workspaceMode, runs, compareMode, compareSnapshots, compareRunId,
-    toggleLayer, setLayerVisible,
+    toggleLayer, setLayerVisible, drawingMode, setDrawingMode,
   } = useWorkbenchStore();
+
+  const [isDrawingZone, setIsDrawingZone] = useState(false);
+  const [drawStart, setDrawStart] = useState({ x: 0, y: 0 });
+  const [drawEnd, setDrawEnd] = useState({ x: 0, y: 0 });
 
   const containerRef = useRef();
   const [containerSize, setContainerSize] = useState({ w: 800, h: 600 });
+
+  const onCanvasMouseDown = (e) => {
+    if (!drawingMode) return;
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setIsDrawingZone(true);
+    setDrawStart({ x, y });
+    setDrawEnd({ x, y });
+  };
+
+  const onCanvasMouseMoveCombined = (e) => {
+    onCanvasMouseMove(e);
+    if (!isDrawingZone) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setDrawEnd({ x, y });
+  };
+
+  const onCanvasMouseUp = (e) => {
+    if (!isDrawingZone) return;
+    setIsDrawingZone(false);
+
+    const x1 = Math.min(drawStart.x, drawEnd.x);
+    const y1 = Math.min(drawStart.y, drawEnd.y);
+    const x2 = Math.max(drawStart.x, drawEnd.x);
+    const y2 = Math.max(drawStart.y, drawEnd.y);
+
+    const pageX1 = Math.round((x1 / displayW) * pageW);
+    const pageY1 = Math.round((y1 / displayH) * pageH);
+    const pageX2 = Math.round((x2 / displayW) * pageW);
+    const pageY2 = Math.round((y2 / displayH) * pageH);
+
+    if (Math.abs(pageX1 - pageX2) > 8 && Math.abs(pageY1 - pageY2) > 8) {
+      const newZoneId = `zone_${Math.random().toString(36).substring(2, 10)}`;
+      const trigger = window.__cfisHitl;
+      if (trigger) {
+        trigger({
+          operation_type: 'zone_operation',
+          target_evidence_ids: [newZoneId],
+          payload: {
+            zone_op_type: 'CREATE_ZONE',
+            target_zone_id: newZoneId,
+            parameters: {
+              zone_type: 'unknown',
+              zone_label: `Zone ${newZoneId.slice(5).toUpperCase()}`,
+              bbox: [pageX1, pageY1, pageX2, pageY2]
+            }
+          }
+        });
+      }
+    }
+    setDrawingMode(false);
+  };
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -55,7 +115,7 @@ export default function DocumentViewer() {
 
   const getIsRelated = useCallback((layerType, item) => {
     if (!selected) return true;
-    
+
     const selType = selected.type;
     const selData = selected.data;
 
@@ -97,7 +157,7 @@ export default function DocumentViewer() {
     if (selType === 'shape') {
       if (layerType === 'shapes' && item.centroid?.[0] === selData.centroid?.[0] && item.centroid?.[1] === selData.centroid?.[1]) return true;
       if (layerType === 'geometry') {
-        const boxCenter = [(item.bbox[0] + item.bbox[2])/2, (item.bbox[1] + item.bbox[3])/2];
+        const boxCenter = [(item.bbox[0] + item.bbox[2]) / 2, (item.bbox[1] + item.bbox[3]) / 2];
         const dist = Math.hypot(boxCenter[0] - selData.centroid[0], boxCenter[1] - selData.centroid[1]);
         if (dist < 12) return true;
       }
@@ -111,42 +171,13 @@ export default function DocumentViewer() {
   const getLayerOpacityVal = useCallback((layerKey, item) => {
     // 1. Base opacity from store
     const baseOpacity = layerOpacities?.[layerKey] ?? 1.0;
-    
+
     // 2. Focus mode modifier
     const isRelated = getIsRelated(layerKey, item);
     const focusModifier = (selected && !isRelated) ? 0.45 : 1.0;
 
-    // 3. IR Level Filter Modifier
-    let irModifier = 1.0;
-    if (irLevel === 'raw_geometry') {
-      // Only show geometry and ocr raw contents
-      if (layerKey !== 'geometry' && layerKey !== 'ocr') {
-        irModifier = 0.0;
-      }
-    } else if (irLevel === 'structural') {
-      // Show geometry, ocr, alignment, and shapes. Hide coordinate grid and fusion/topology.
-      if (layerKey === 'coordinate_space' || layerKey === 'fusion' || layerKey === 'topology' || layerKey === 'orphan') {
-        irModifier = 0.0;
-      }
-    } else if (irLevel === 'coordinate') {
-      // Show coordinate grid, geometry, ocr, shapes, alignment. Dim fusion/topology.
-      if (layerKey === 'fusion' || layerKey === 'topology') {
-        irModifier = 0.25;
-      }
-    } else if (irLevel === 'cognitive') {
-      // Filter out low confidence nodes to focus on high confidence ones (salient filters)
-      if (item && item.confidence !== undefined && item.confidence < 0.85) {
-        irModifier = 0.15; // Dim low confidence items
-      }
-    } else if (irLevel === 'reasoning') {
-      // Dim raw inputs, focus on resolved fusion / topology cells
-      if (layerKey === 'geometry' || layerKey === 'ocr' || layerKey === 'shapes') {
-        irModifier = 0.25;
-      }
-    }
-    
-    return baseOpacity * focusModifier * irModifier;
-  }, [layerOpacities, selected, getIsRelated, irLevel]);
+    return baseOpacity * focusModifier;
+  }, [layerOpacities, selected, getIsRelated]);
 
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0, px: 0, py: 0 });
@@ -229,11 +260,11 @@ export default function DocumentViewer() {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    
+
     // Scale back to original page coordinates
     const pageX = Math.round((x / displayW) * pageW);
     const pageY = Math.round((y / displayH) * pageH);
-    
+
     if (pageX >= 0 && pageX <= pageW && pageY >= 0 && pageY <= pageH) {
       setHoverCoords({ x: pageX, y: pageY });
     } else {
@@ -350,7 +381,7 @@ export default function DocumentViewer() {
           ctx.strokeStyle = '#F59E0B'; // Yellow
           const [tx1, ty1, tx2, ty2] = table.bbox;
           ctx.strokeRect(tx1, ty1, tx2 - tx1, ty2 - ty1);
-          
+
           ctx.font = 'bold 10px sans-serif';
           ctx.fillStyle = '#F59E0B';
           ctx.fillText(`Table ${table.table_id}`, tx1 + 4, ty1 + 12);
@@ -362,6 +393,150 @@ export default function DocumentViewer() {
             ctx.strokeStyle = 'rgba(245, 158, 11, 0.4)';
             ctx.strokeRect(cx1, cy1, cx2 - cx1, cy2 - cy1);
           });
+        });
+      }
+
+      // 4.7. Draw Semantic Zones Layer
+      if (layers.zones && snapshots.topology?.zones) {
+        snapshots.topology.zones.forEach(z => {
+          const op = getLayerOpacityVal('zones', z);
+          ctx.globalAlpha = op;
+          const isSel = selected?.type === 'zone' && selected?.data?.zone_id === z.zone_id;
+          const isDyn = !!z.is_dynamic;
+          const themeColor = isDyn ? '#F43F5E' : '#EC4899';
+
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = themeColor;
+          
+          if (isDyn) {
+            ctx.setLineDash([6, 4]);
+          } else {
+            ctx.setLineDash([]);
+          }
+
+          const [x1, y1, x2, y2] = z.bbox;
+          ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+          
+          if (isSel) {
+            ctx.fillStyle = isDyn ? 'rgba(244, 63, 94, 0.15)' : 'rgba(236, 72, 153, 0.15)';
+            ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+          }
+          ctx.setLineDash([]); // Reset
+
+          // Draw label background and text
+          ctx.font = 'bold 9px sans-serif';
+          let driftText = '';
+          if (isDyn && z.coordinate_drift) {
+            const dx = z.coordinate_drift.x ?? 0;
+            const dy = z.coordinate_drift.y ?? 0;
+            driftText = ` (Δ: ${dx.toFixed(0)},${dy.toFixed(0)})`;
+          }
+          const label = `${isDyn ? '⚡' : '👤'} ${z.zone_label} (${z.zone_type})${driftText}`;
+          const textW = ctx.measureText(label).width;
+
+          ctx.fillStyle = themeColor;
+          ctx.fillRect(x1 - 1, y1 - 14, textW + 8, 14);
+
+          ctx.fillStyle = '#FFFFFF';
+          ctx.textBaseline = 'top';
+          ctx.fillText(label, x1 + 3, y1 - 12);
+        });
+      }
+
+      // 4.8. Draw Form Graph Layer
+      if (layers.formGraph && snapshots.topology?.form_graph?.elements) {
+        const elements = snapshots.topology.form_graph.elements;
+        const edges = snapshots.topology.form_graph.edges || [];
+
+        // Draw Elements
+        Object.values(elements).forEach(el => {
+          if (!el.bbox || el.bbox.x_min == null || el.bbox.y_min == null || el.bbox.x_max == null || el.bbox.y_max == null) return;
+          const op = getLayerOpacityVal('formGraph', el);
+          ctx.globalAlpha = op;
+
+          let themeColor = '#A855F7'; // default purple
+          if (el.element_type === 'atomic_field') themeColor = '#3B82F6';
+          else if (el.element_type === 'enum_group') themeColor = '#D946EF';
+          else if (el.element_type === 'composite_field') themeColor = '#10B981';
+          else if (el.element_type === 'conditional_branch') themeColor = '#F59E0B';
+
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = themeColor;
+          const x1 = el.bbox.x_min;
+          const y1 = el.bbox.y_min;
+          const x2 = el.bbox.x_max;
+          const y2 = el.bbox.y_max;
+
+          ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+          
+          const isSel = selected?.type === 'form_element' && selected?.data?.element_id === el.element_id;
+          if (isSel) {
+            ctx.fillStyle = `${themeColor}33`; // 20% opacity matching CSS
+            ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+          } else {
+            ctx.fillStyle = `${themeColor}0D`; // 5% opacity matching CSS
+            ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+          }
+
+          // Draw label background and text
+          ctx.font = 'bold 9px sans-serif';
+          const label = `${el.element_type.replace('_', ' ').toUpperCase()}: ${el.label}`;
+          const textW = ctx.measureText(label).width;
+
+          ctx.fillStyle = themeColor;
+          ctx.fillRect(x1 - 1, y1 - 14, textW + 8, 14);
+
+          ctx.fillStyle = '#FFFFFF';
+          ctx.textBaseline = 'top';
+          ctx.fillText(label, x1 + 3, y1 - 12);
+        });
+
+        // Draw Edges
+        edges.forEach(edge => {
+          const src = elements[edge.source_id];
+          const tgt = elements[edge.target_id];
+          if (!src || !tgt || !src.bbox || !tgt.bbox) return;
+
+          const sx = (src.bbox.x_min + src.bbox.x_max) / 2;
+          const sy = (src.bbox.y_min + src.bbox.y_max) / 2;
+          const tx = (tgt.bbox.x_min + tgt.bbox.x_max) / 2;
+          const ty = (tgt.bbox.y_min + tgt.bbox.y_max) / 2;
+
+          const op = getLayerOpacityVal('formGraph', edge);
+          ctx.globalAlpha = op;
+
+          let strokeColor = '#94A3B8'; // contains / default
+          let dash = [];
+
+          if (edge.relation_type === 'option_of') {
+            strokeColor = '#10B981'; // Green
+          } else if (edge.relation_type === 'activates') {
+            strokeColor = '#F43F5E'; // Red
+          } else if (edge.relation_type === 'child_reason') {
+            strokeColor = '#F59E0B'; // Amber
+            dash = [4, 3];
+          }
+
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = 2;
+          ctx.setLineDash(dash);
+
+          ctx.beginPath();
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(tx, ty);
+          ctx.stroke();
+          ctx.setLineDash([]); // reset
+
+          // Draw arrowhead at target
+          const angle = Math.atan2(ty - sy, tx - sx);
+          const arrowLength = 8;
+          ctx.beginPath();
+          ctx.moveTo(tx, ty);
+          ctx.lineTo(tx - arrowLength * Math.cos(angle - Math.PI / 6), ty - arrowLength * Math.sin(angle - Math.PI / 6));
+          ctx.lineTo(tx - arrowLength * Math.cos(angle + Math.PI / 6), ty - arrowLength * Math.sin(angle + Math.PI / 6));
+          ctx.closePath();
+          ctx.fillStyle = strokeColor;
+          ctx.fill();
         });
       }
 
@@ -401,7 +576,7 @@ export default function DocumentViewer() {
         ctx.setLineDash([3, 3]);
         ctx.font = '8px monospace';
         ctx.fillStyle = '#06B6D4';
-        
+
         const showLine = layerRenderModes.coordinate_space !== 'axis_only';
         const showText = layerRenderModes.coordinate_space !== 'grid_only';
 
@@ -419,7 +594,7 @@ export default function DocumentViewer() {
             ctx.fillText(Math.round(x).toString(), x + 4, 15);
           }
         }
-        
+
         // Horizontal lines
         for (let i = 0; i < 9; i++) {
           const pct = (i + 1) * 0.1;
@@ -459,17 +634,17 @@ export default function DocumentViewer() {
       if (layers.shapes && snapshots.shapes?.shapes) {
         snapshots.shapes.shapes.forEach((s, idx) => {
           const matchedRegion = snapshots.geometry?.regions?.find(r => {
-            const boxCenter = [(r.bbox[0] + r.bbox[2])/2, (r.bbox[1] + r.bbox[3])/2];
+            const boxCenter = [(r.bbox[0] + r.bbox[2]) / 2, (r.bbox[1] + r.bbox[3]) / 2];
             const dist = Math.hypot(boxCenter[0] - s.centroid[0], boxCenter[1] - s.centroid[1]);
             return dist < 12;
           });
-          
+
           const cx = s.centroid[0];
           const cy = s.centroid[1];
           const isSel = selected?.type === 'shape' && selected?.data?.centroid?.[0] === s.centroid[0] && selected?.data?.centroid?.[1] === s.centroid[1];
           const op = getLayerOpacityVal('shapes', s);
           ctx.globalAlpha = op;
-          
+
           const showBorder = layerRenderModes.shapes !== 'centroid';
           const showSaliency = layerRenderModes.shapes === 'saliency';
 
@@ -527,6 +702,66 @@ export default function DocumentViewer() {
     };
   };
 
+  const downloadJSON = () => {
+    if (!snapshots) return;
+    try {
+      // Highly compacted representation of layout and topology to preserve LLM token context
+      const compactSnapshot = {
+        run_id: runId,
+        page_info: {
+          width: pageW,
+          height: pageH,
+        },
+        // Compacted Zones list: keep coordinates and metadata
+        zones: (layers.zones && snapshots.topology?.zones?.map(z => ({
+          id: z.zone_id,
+          label: z.zone_label,
+          type: z.zone_type,
+          bbox: z.bbox?.map(v => Math.round(v)),
+          is_dynamic: !!z.is_dynamic,
+          drift: z.coordinate_drift ? { x: Math.round(z.coordinate_drift.x), y: Math.round(z.coordinate_drift.y) } : undefined,
+          direction: z.direction || 'RTL',
+        }))) || [],
+        // Compacted Tables: keep grid locations and cell indexes
+        tables: (layers.topology && snapshots.topology?.tables?.map(t => ({
+          id: t.table_id,
+          bbox: t.bbox?.map(v => Math.round(v)),
+          grid: `${t.rows_count}x${t.cols_count}`,
+          cells: t.cells?.map(c => ({
+            id: c.cell_id?.slice(0, 12),
+            bbox: c.bbox?.map(v => Math.round(v)),
+            grid_pos: [c.row_index, c.column_index, c.rowspan, c.colspan],
+          })),
+        }))) || [],
+        // Compacted OCR Tokens: Strip hashes and metadata, round bboxes
+        ocr_tokens: (layers.ocr && snapshots.ocr?.tokens?.map(t => ({
+          t: t.text,
+          b: t.bbox?.map(v => Math.round(v)),
+        }))) || [],
+        // Compacted Hierarchy tree
+        hierarchy: (layers.topology && snapshots.topology?.hierarchy?.map(h => ({
+          id: h.element_id,
+          type: h.element_type,
+          parent: h.parent_id,
+          children: h.children_ids,
+        }))) || [],
+        form_graph: (layers.formGraph && snapshots.topology?.form_graph) || null,
+      };
+
+      const blob = new Blob([JSON.stringify(compactSnapshot, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.download = `pipeline_snapshot_compact_${runId || 'extract'}.json`;
+      link.href = url;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export compact JSON:', err);
+    }
+  };
+
   // Pan drag
   const onMouseDown = (e) => {
     // Allow dragging from the container or the background wrapper
@@ -555,13 +790,15 @@ export default function DocumentViewer() {
     if (!el) return;
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [onWheel]);
+  }, [onWheel, runId]);
 
   const renderCanvas = (targetSnapshots, isCurrent = true) => {
     if (!targetSnapshots) return null;
     return (
       <div
-        onMouseMove={onCanvasMouseMove}
+        onMouseDown={isCurrent ? onCanvasMouseDown : undefined}
+        onMouseMove={isCurrent ? onCanvasMouseMoveCombined : onCanvasMouseMove}
+        onMouseUp={isCurrent ? onCanvasMouseUp : undefined}
         onMouseLeave={onCanvasMouseLeave}
         style={{
           position: 'relative',
@@ -573,14 +810,62 @@ export default function DocumentViewer() {
           overflow: 'hidden',
           flexShrink: 0,
           pointerEvents: 'auto',
+          cursor: (isCurrent && drawingMode) ? 'crosshair' : 'default',
         }}>
         {/* Page image */}
         {pageImage
           ? <img draggable={false} src={pageImage} alt="Document page" width={displayW} height={displayH} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', pointerEvents: 'none', userSelect: 'none' }} />
           : <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span style={{ fontSize: 10, color: '#94a3b8', textAlign: 'center' }}>Demo Fixture Mode<br />Upload a PDF to see the real document</span>
-            </div>
+            <span style={{ fontSize: 10, color: '#94a3b8', textAlign: 'center' }}>Demo Fixture Mode<br />Upload a PDF to see the real document</span>
+          </div>
         }
+
+        {/* ── SEMANTIC ZONES LAYER ──────────────────────────────── */}
+        {layers.zones && targetSnapshots.topology?.zones?.map(z => {
+          const [x1, y1, x2, y2] = scale(z.bbox);
+          const isSel = selected?.type === 'zone' && selected?.data?.zone_id === z.zone_id;
+          const op = getLayerOpacityVal('zones', z);
+          const isDyn = !!z.is_dynamic;
+          const themeColor = isDyn ? '#F43F5E' : '#EC4899';
+          
+          let driftText = '';
+          if (isDyn && z.coordinate_drift) {
+            const dx = z.coordinate_drift.x ?? 0;
+            const dy = z.coordinate_drift.y ?? 0;
+            driftText = ` (Δ: ${dx.toFixed(0)},${dy.toFixed(0)})`;
+          }
+
+          return (
+            <div
+              key={z.zone_id}
+              onClick={(e) => { e.stopPropagation(); if (isCurrent) setSelected({ type: 'zone', data: z }); }}
+              title={`${isDyn ? '⚡ Auto-Discovered Zone' : '👤 Static Zone'} · ${z.zone_label} (${z.zone_type})${driftText}`}
+              onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = `${themeColor}25`; }}
+              onMouseLeave={(e) => { if (!isSel) e.currentTarget.style.background = `${themeColor}05`; }}
+              style={{
+                position: 'absolute',
+                left: x1, top: y1, width: x2 - x1, height: y2 - y1,
+                border: `2px ${isDyn ? 'dashed' : 'solid'} ${isSel ? themeColor : `${themeColor}aa`}`,
+                background: isSel ? `${themeColor}35` : `${themeColor}05`,
+                cursor: 'pointer', zIndex: 8,
+                boxShadow: isSel ? `0 0 0 2px ${themeColor}, 0 0 16px ${themeColor}80` : 'none',
+                transition: 'all 0.15s',
+                opacity: op,
+              }}
+            >
+              <div style={{
+                position: 'absolute', top: -14, left: -2,
+                background: themeColor, color: '#FFFFFF',
+                fontSize: 8, fontWeight: 700, padding: '1px 4px',
+                borderRadius: '2px 2px 0 0', whiteSpace: 'nowrap',
+                display: 'flex', alignItems: 'center', gap: '3px'
+              }}>
+                <span>{isDyn ? '⚡' : '👤'}</span>
+                <span>{z.zone_label} ({z.zone_type}){driftText}</span>
+              </div>
+            </div>
+          );
+        })}
 
         {/* ── GEOMETRY LAYER ────────────────────────────────────── */}
         {layers.geometry && targetSnapshots.geometry?.regions?.map(r => {
@@ -608,10 +893,19 @@ export default function DocumentViewer() {
           );
         })}
 
+
         {/* ── OCR TOKEN LAYER ───────────────────────────────────── */}
         {layers.ocr && targetSnapshots.ocr?.tokens?.map(t => {
           const [x1, y1, x2, y2] = scale(t.bbox);
           const isSel = selected?.data?.id === t.id;
+          const isInsideSelectedZone = selected?.type === 'zone' && (() => {
+            if (!t.bbox || !selected.data?.bbox) return false;
+            const [tx1, ty1, tx2, ty2] = t.bbox;
+            const [zx1, zy1, zx2, zy2] = selected.data.bbox;
+            const cx = (tx1 + tx2) / 2;
+            const cy = (ty1 + ty2) / 2;
+            return cx >= zx1 && cx <= zx2 && cy >= zy1 && cy <= zy2;
+          })();
           const op = getLayerOpacityVal('ocr', t);
           return (
             <div
@@ -620,22 +914,22 @@ export default function DocumentViewer() {
               onClick={(e) => { e.stopPropagation(); if (isCurrent) setSelected({ type: 'token', data: t }); }}
               title={`"${t.text}" · ${(t.confidence * 100).toFixed(0)}% · ${t.id?.slice(0, 12)}…`}
               onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = `${C.green}30`; }}
-              onMouseLeave={(e) => { if (!isSel) e.currentTarget.style.background = `${C.green}18`; }}
+              onMouseLeave={(e) => { if (!isSel) e.currentTarget.style.background = isInsideSelectedZone ? 'rgba(244, 63, 94, 0.15)' : `${C.green}18`; }}
               style={{
                 position: 'absolute',
                 left: x1, top: y1, width: x2 - x1, height: y2 - y1,
-                border: `1.5px solid ${C.green}${isSel ? '' : '80'}`,
-                background: isSel ? `${C.green}35` : `${C.green}18`,
+                border: isSel ? `2px solid ${C.green}` : isInsideSelectedZone ? `1.5px dashed #F43F5E` : `1.5px solid ${C.green}80`,
+                background: isSel ? `${C.green}35` : isInsideSelectedZone ? 'rgba(244, 63, 94, 0.15)' : `${C.green}18`,
                 cursor: 'pointer', zIndex: 3,
                 display: 'flex', alignItems: 'center', overflow: 'hidden',
-                boxShadow: isSel ? `0 0 0 2px ${C.green}, 0 0 12px ${C.green}50` : 'none',
+                boxShadow: isSel ? `0 0 0 2px ${C.green}, 0 0 12px ${C.green}50` : isInsideSelectedZone ? '0 0 8px rgba(244, 63, 94, 0.4)' : 'none',
                 transition: 'all 0.15s',
                 opacity: op,
               }}
             >
               <span style={{
                 fontSize: Math.max(7, (y2 - y1) * 0.45),
-                color: '#064E3B', fontWeight: 700,
+                color: isInsideSelectedZone ? '#FFFFFF' : '#064E3B', fontWeight: 700,
                 padding: '0 2px', direction: 'rtl',
                 width: '100%', overflow: 'hidden', whiteSpace: 'nowrap',
                 pointerEvents: 'none',
@@ -660,7 +954,7 @@ export default function DocumentViewer() {
               const tx = (tx1 + tx2) / 2, ty = (ty1 + ty2) / 2;
               const rx = (rx1 + rx2) / 2, ry = (ry1 + ry2) / 2;
               const op = getLayerOpacityVal('alignment', a);
-              
+
               let strokeColor = ALIGNMENT_COLORS[a.type] ?? C.pink;
               if (layerRenderModes.alignment === 'gradient') {
                 const score = a.alignment_score ?? 1.0;
@@ -687,6 +981,15 @@ export default function DocumentViewer() {
           const score = f.confidence ?? 0;
           const color = score > 0.85 ? C.green : score > 0.6 ? C.yellow : C.red;
           const isSel = selected?.data?.id === f.id || selected?.data?.field_id === f.id;
+          const isSelZoneChild = selected?.type === 'zone' && (() => {
+            const f_bbox = f.bbox || tok?.bbox;
+            if (!f_bbox || !selected.data?.bbox) return false;
+            const [fx1, fy1, fx2, fy2] = f_bbox;
+            const [zx1, zy1, zx2, zy2] = selected.data.bbox;
+            const cx = (fx1 + fx2) / 2;
+            const cy = (fy1 + fy2) / 2;
+            return cx >= zx1 && cx <= zx2 && cy >= zy1 && cy <= zy2;
+          })();
           const op = getLayerOpacityVal('fusion', f);
           return (
             <div
@@ -697,10 +1000,13 @@ export default function DocumentViewer() {
                 position: 'absolute',
                 left: x2 + 3, top: y1,
                 padding: '2px 6px', borderRadius: 4,
-                background: '#0B1120', border: `1px solid ${color}`,
-                fontSize: 8, fontFamily: 'monospace', color, zIndex: 5,
+                background: isSelZoneChild ? 'rgba(244, 63, 94, 0.25)' : '#0B1120',
+                border: isSel ? `1.5px solid ${color}` : isSelZoneChild ? `1.5px solid #F43F5E` : `1px solid ${color}`,
+                fontSize: 8, fontFamily: 'monospace',
+                color: isSelZoneChild ? '#FFFFFF' : color,
+                zIndex: 5,
                 cursor: 'pointer', whiteSpace: 'nowrap',
-                boxShadow: isSel ? `0 0 6px ${color}60` : 'none',
+                boxShadow: isSel ? `0 0 6px ${color}60` : isSelZoneChild ? `0 0 12px #F43F5E, 0 0 4px #F43F5E` : 'none',
                 opacity: op,
               }}
             >
@@ -788,6 +1094,129 @@ export default function DocumentViewer() {
           );
         })}
 
+        {/* ── FORM GRAPH LAYER ────────────────────────────────── */}
+        {layers.formGraph && targetSnapshots.topology?.form_graph?.elements && (() => {
+          const elements = targetSnapshots.topology.form_graph.elements;
+          const edges = targetSnapshots.topology.form_graph.edges || [];
+          
+          return (
+            <React.Fragment>
+              {/* Elements boxes */}
+              {Object.values(elements).map(el => {
+                if (!el.bbox || el.bbox.x_min == null || el.bbox.y_min == null || el.bbox.x_max == null || el.bbox.y_max == null) return null;
+                
+                const [x1, y1, x2, y2] = scale([
+                  el.bbox.x_min,
+                  el.bbox.y_min,
+                  el.bbox.x_max,
+                  el.bbox.y_max
+                ]);
+                const isSel = selected?.type === 'form_element' && selected?.data?.element_id === el.element_id;
+                const op = getLayerOpacityVal('formGraph', el);
+                
+                // Color based on element type
+                let themeColor = '#A855F7'; // default purple
+                if (el.element_type === 'atomic_field') themeColor = '#3B82F6'; // Blue
+                else if (el.element_type === 'enum_group') themeColor = '#D946EF'; // Magenta/Pink
+                else if (el.element_type === 'composite_field') themeColor = '#10B981'; // Emerald
+                else if (el.element_type === 'conditional_branch') themeColor = '#F59E0B'; // Amber
+                
+                return (
+                  <div
+                    key={el.element_id}
+                    onClick={(e) => { e.stopPropagation(); if (isCurrent) setSelected({ type: 'form_element', data: el }); }}
+                    title={`[${el.element_type.toUpperCase()}] ${el.label}`}
+                    onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = `${themeColor}20`; }}
+                    onMouseLeave={(e) => { if (!isSel) e.currentTarget.style.background = `${themeColor}05`; }}
+                    style={{
+                      position: 'absolute',
+                      left: x1, top: y1, width: x2 - x1, height: y2 - y1,
+                      border: `2px solid ${isSel ? themeColor : `${themeColor}aa`}`,
+                      background: isSel ? `${themeColor}35` : `${themeColor}05`,
+                      cursor: 'pointer', zIndex: 15,
+                      boxShadow: isSel ? `0 0 0 2px ${themeColor}, 0 0 16px ${themeColor}aa` : 'none',
+                      transition: 'all 0.15s',
+                      opacity: op,
+                    }}
+                  >
+                    <div style={{
+                      position: 'absolute', top: -14, left: -2,
+                      background: themeColor, color: '#FFFFFF',
+                      fontSize: 8, fontWeight: 700, padding: '1px 4px',
+                      borderRadius: '2px 2px 0 0', whiteSpace: 'nowrap',
+                    }}>
+                      {el.element_type.replace('_', ' ').toUpperCase()}: {el.label}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Edge SVG lines */}
+              <svg
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 16 }}
+                aria-hidden="true"
+              >
+                <defs>
+                  <marker id="arrow-contains" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#94A3B8" />
+                  </marker>
+                  <marker id="arrow-option" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#10B981" />
+                  </marker>
+                  <marker id="arrow-activates" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#F43F5E" />
+                  </marker>
+                  <marker id="arrow-child" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#F59E0B" />
+                  </marker>
+                </defs>
+                {edges.map((edge, idx) => {
+                  const src = elements[edge.source_id];
+                  const tgt = elements[edge.target_id];
+                  if (!src || !tgt) return null;
+                  if (!src.bbox || !tgt.bbox) return null;
+                  
+                  const [sx1, sy1, sx2, sy2] = scale([src.bbox.x_min, src.bbox.y_min, src.bbox.x_max, src.bbox.y_max]);
+                  const [tx1, ty1, tx2, ty2] = scale([tgt.bbox.x_min, tgt.bbox.y_min, tgt.bbox.x_max, tgt.bbox.y_max]);
+                  
+                  const sx = (sx1 + sx2) / 2;
+                  const sy = (sy1 + sy2) / 2;
+                  const tx = (tx1 + tx2) / 2;
+                  const ty = (ty1 + ty2) / 2;
+                  const op = getLayerOpacityVal('formGraph', edge);
+                  
+                  let strokeColor = '#94A3B8'; // contains / default
+                  let markerId = 'arrow-contains';
+                  let dash = '';
+                  
+                  if (edge.relation_type === 'option_of') {
+                    strokeColor = '#10B981'; // Green
+                    markerId = 'arrow-option';
+                  } else if (edge.relation_type === 'activates') {
+                    strokeColor = '#F43F5E'; // Red
+                    markerId = 'arrow-activates';
+                  } else if (edge.relation_type === 'child_reason') {
+                    strokeColor = '#F59E0B'; // Amber
+                    markerId = 'arrow-child';
+                    dash = '4 3';
+                  }
+                  
+                  return (
+                    <line
+                      key={`edge-${idx}`}
+                      x1={sx} y1={sy} x2={tx} y2={ty}
+                      stroke={strokeColor} strokeWidth={2}
+                      strokeDasharray={dash}
+                      markerEnd={`url(#${markerId})`}
+                      opacity={op}
+                    />
+                  );
+                })}
+              </svg>
+            </React.Fragment>
+          );
+        })()}
+
         {/* ── COORDINATE SPACE GRID LAYER ───────────────────────── */}
         {layers.coordinate_space && (
           <svg
@@ -865,7 +1294,7 @@ export default function DocumentViewer() {
         {/* ── PRIMITIVE SHAPES LAYER ───────────────────────────── */}
         {layers.shapes && targetSnapshots.shapes?.shapes?.map((s, idx) => {
           const matchedRegion = targetSnapshots.geometry?.regions?.find(r => {
-            const boxCenter = [(r.bbox[0] + r.bbox[2])/2, (r.bbox[1] + r.bbox[3])/2];
+            const boxCenter = [(r.bbox[0] + r.bbox[2]) / 2, (r.bbox[1] + r.bbox[3]) / 2];
             const dist = Math.hypot(boxCenter[0] - s.centroid[0], boxCenter[1] - s.centroid[1]);
             return dist < 12;
           });
@@ -909,6 +1338,20 @@ export default function DocumentViewer() {
             </React.Fragment>
           );
         })}
+        {isDrawingZone && (
+          <div style={{
+            position: 'absolute',
+            left: Math.min(drawStart.x, drawEnd.x),
+            top: Math.min(drawStart.y, drawEnd.y),
+            width: Math.abs(drawStart.x - drawEnd.x),
+            height: Math.abs(drawStart.y - drawEnd.y),
+            border: '2.5px dashed #F43F5E',
+            background: 'rgba(244, 63, 94, 0.18)',
+            zIndex: 999,
+            pointerEvents: 'none',
+            boxShadow: '0 0 8px rgba(244, 63, 94, 0.5)'
+          }} />
+        )}
       </div>
     );
   };
@@ -956,7 +1399,8 @@ export default function DocumentViewer() {
         position: 'relative',
       }}
     >
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style dangerouslySetInnerHTML={{
+        __html: `
         .ocr-token-box span {
           opacity: 0;
           transition: opacity 0.12s ease-in-out;
@@ -1017,34 +1461,65 @@ export default function DocumentViewer() {
         )}
       </div>
 
-      {/* Download Canvas Image Button */}
-      <button
-        onClick={downloadAsImage}
-        style={{
-          position: 'absolute',
-          bottom: 16,
-          left: 16,
-          background: 'rgba(16, 185, 129, 0.15)',
-          border: '1px solid #10B981',
-          borderRadius: 6,
-          padding: '6px 12px',
-          color: '#E2E8F0',
-          fontSize: 10,
-          fontWeight: 600,
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          backdropFilter: 'blur(4px)',
-          transition: 'all 0.2s',
-          zIndex: 100,
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(16, 185, 129, 0.3)'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(16, 185, 129, 0.15)'; }}
-      >
-        <span>📸</span>
-        <span>حفظ الاستمارة كصورة</span>
-      </button>
+      {/* Toolbar Buttons (Bottom Left) */}
+      <div style={{
+        position: 'absolute',
+        bottom: 16,
+        left: 16,
+        display: 'flex',
+        gap: 8,
+        zIndex: 100,
+      }}>
+        {/* Download Canvas Image Button */}
+        <button
+          onClick={downloadAsImage}
+          style={{
+            background: 'rgba(16, 185, 129, 0.15)',
+            border: '1px solid #10B981',
+            borderRadius: 6,
+            padding: '6px 12px',
+            color: '#E2E8F0',
+            fontSize: 10,
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            backdropFilter: 'blur(4px)',
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(16, 185, 129, 0.3)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(16, 185, 129, 0.15)'; }}
+        >
+          <span>📸</span>
+          <span>حفظ الاستمارة كصورة</span>
+        </button>
+
+        {/* Export JSON Button */}
+        <button
+          onClick={downloadJSON}
+          style={{
+            background: 'rgba(6, 182, 212, 0.15)',
+            border: '1px solid #06B6D4',
+            borderRadius: 6,
+            padding: '6px 12px',
+            color: '#E2E8F0',
+            fontSize: 10,
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            backdropFilter: 'blur(4px)',
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(6, 182, 212, 0.3)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(6, 182, 212, 0.15)'; }}
+        >
+          <span>📦</span>
+          <span>تصدير التحليل (JSON)</span>
+        </button>
+      </div>
 
       {/* Viewport Minimap Tracker */}
       {layers.minimap && (

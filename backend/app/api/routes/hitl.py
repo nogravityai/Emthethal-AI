@@ -9,7 +9,8 @@ from pydantic import BaseModel
 
 from app.services.hitl.models import (
     HumanOperation, HumanLineRejection, HumanLineApproval,
-    HumanRegionMerge, HumanRegionSplit, HumanTokenReassignment, HumanCheckboxCorrection
+    HumanRegionMerge, HumanRegionSplit, HumanTokenReassignment, HumanCheckboxCorrection,
+    HumanZoneOperation, HumanFieldTypeCorrection
 )
 from app.services.hitl.operations_ledger import global_operations_ledger
 
@@ -48,6 +49,10 @@ async def submit_operation(sub: OperationSubmission):
             op = HumanTokenReassignment(run_id=sub.run_id, operator_id=sub.operator_id, target_evidence_ids=sub.target_evidence_ids, **sub.payload)
         elif sub.operation_type == "checkbox_correction":
             op = HumanCheckboxCorrection(run_id=sub.run_id, operator_id=sub.operator_id, target_evidence_ids=sub.target_evidence_ids, **sub.payload)
+        elif sub.operation_type == "zone_operation":
+            op = HumanZoneOperation(run_id=sub.run_id, operator_id=sub.operator_id, target_evidence_ids=sub.target_evidence_ids, **sub.payload)
+        elif sub.operation_type == "field_type_correction":
+            op = HumanFieldTypeCorrection(run_id=sub.run_id, operator_id=sub.operator_id, target_evidence_ids=sub.target_evidence_ids, **sub.payload)
         else:
             raise HTTPException(400, detail=f"Unknown operation_type: {sub.operation_type}")
     except Exception as e:

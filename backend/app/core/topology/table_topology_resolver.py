@@ -1,4 +1,5 @@
 import logging
+from collections import deque
 from typing import List, Dict, Any, Tuple
 from app.models.schemas import BoundingBox, TableTopologyEvidence, CoordinateSpace
 from app.services.pipeline.pipeline_models import generate_stable_id
@@ -23,14 +24,17 @@ class TableTopologyResolver:
         page_width: int,
         page_height: int
     ) -> List[TableTopologyEvidence]:
-        if not boxes:
+        # Only process regions/boxes where region_type is "table", "table_cell", "input_box", or "unknown"
+        table_boxes = [b for b in boxes if getattr(b, "region_type", None) in ("table", "table_cell", "input_box", "unknown")]
+        if not table_boxes:
             return []
 
         # 1. Cluster boxes into logical tables
-        tables = self._cluster_boxes_into_tables(boxes)
+        tables = self._cluster_boxes_into_tables(table_boxes)
         
         topology_evidence = []
-        for table_idx, table_boxes in enumerate(tables):
+        for table_idx, cluster_boxes in enumerate(tables):
+            table_boxes = cluster_boxes
             table_id = f"table_{page_number}_{table_idx}"
             
             # Find the bounding box of this table
@@ -76,7 +80,7 @@ class TableTopologyResolver:
                     y_start = unique_rows[r]
                     y_end = unique_rows[r+1]
                     intersect = max(0.0, min(box.bbox.y2, y_end) - max(box.bbox.y1, y_start))
-                    union = min(box.bbox.y2 - box.bbox.y1, y_end - y_start)
+                    union = max(box.bbox.y2, y_end) - min(box.bbox.y1, y_start)
                     if union > 0 and (intersect / union) > self.overlap_threshold:
                         matched_rows.append(r)
 
@@ -86,7 +90,7 @@ class TableTopologyResolver:
                     x_start = unique_cols[c]
                     x_end = unique_cols[c+1]
                     intersect = max(0.0, min(box.bbox.x2, x_end) - max(box.bbox.x1, x_start))
-                    union = min(box.bbox.x2 - box.bbox.x1, x_end - x_start)
+                    union = max(box.bbox.x2, x_end) - min(box.bbox.x1, x_start)
                     if union > 0 and (intersect / union) > self.overlap_threshold:
                         matched_cols.append(c)
 
@@ -158,10 +162,10 @@ class TableTopologyResolver:
         for i in range(len(boxes)):
             if i not in visited:
                 comp = []
-                queue = [i]
+                queue = deque([i])
                 visited.add(i)
                 while queue:
-                    curr = queue.pop(0)
+                    curr = queue.popleft()
                     comp.append(boxes[curr])
                     for nbr in connections[curr]:
                         if nbr not in visited:

@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useWorkbenchStore, PIPELINE_STAGES, LAYER_META } from '../store/workbenchStore.js';
 import { pipelineService } from '../services/pipelineService.js';
+import { LAYER_HINTS } from './layerHints.js';
 
 const C = {
   bg: '#05080F', panel: '#0B1120', border: '#1A2438',
@@ -120,10 +121,10 @@ export default function LeftPanel() {
     layers, toggleLayer, setLayerVisible,
     layerOpacities, setLayerOpacity,
     layerRenderModes, setLayerRenderMode,
-    irLevel, setIrLevel,
     compareRunId, setCompareMode, setCompareSnapshots, setLoading,
   } = useWorkbenchStore();
   const [tab, setTab] = useState('stages'); // 'stages' | 'layers' | 'timeline' | 'artifacts'
+  const [activeHintKey, setActiveHintKey] = useState(null);
 
   const timelineStages = timeline?.stages ?? [];
   const allStages = PIPELINE_STAGES.map(ps => {
@@ -144,7 +145,10 @@ export default function LeftPanel() {
       items: [
         { key: 'geometry', label: 'Geometry Regions', color: '#3B82F6' },
         { key: 'topology', label: 'Table Topology', color: '#FBBF24' },
+        { key: 'zones', label: 'Semantic Zones', color: '#F43F5E' },
+        { key: 'formGraph', label: 'Form Graph', color: '#A855F7' },
         { key: 'coordinate_space', label: 'Coordinate Spaces', color: '#06B6D4' },
+
       ]
     },
     {
@@ -259,51 +263,54 @@ export default function LeftPanel() {
         {/* ── LAYERS TAB ────────────────────────────────────────────── */}
         {tab === 'layers' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* 1. IR Compiler Level Stepper */}
+            {/* Hierarchical Layer Tree */}
             <div>
-              <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, fontWeight: 700 }}>
-                Visual Compiler IR Levels
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, background: C.bg, padding: 8, borderRadius: 8, border: `1px solid ${C.border}` }}>
-                {[
-                  { key: 'raw_geometry', label: '1. Raw Geometry IR', desc: 'Contours & lines (no context)' },
-                  { key: 'structural', label: '2. Structural IR', desc: 'Grid lattice & suppression context' },
-                  { key: 'coordinate', label: '3. Coordinate IR', desc: 'DPI normalized & calibrated scales' },
-                  { key: 'cognitive', label: '4. Cognitive IR', desc: 'Salient evidence filters (no noise)' },
-                  { key: 'reasoning', label: '5. Semantic IR', desc: 'Unified resolved medical entities' },
-                ].map(lvl => {
-                  const isActive = irLevel === lvl.key;
-                  return (
-                    <button
-                      key={lvl.key}
-                      onClick={() => setIrLevel(lvl.key)}
-                      style={{
-                        textAlign: 'left',
-                        padding: '6px 10px',
-                        borderRadius: 6,
-                        border: `1px solid ${isActive ? C.accent : 'transparent'}`,
-                        background: isActive ? `${C.accent}15` : 'transparent',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s',
-                        width: '100%',
-                      }}
-                    >
-                      <div style={{ fontSize: 10, fontWeight: 700, color: isActive ? C.accent : C.text }}>
-                        {lvl.label}
-                      </div>
-                      <div style={{ fontSize: 8, color: C.muted, marginTop: 2 }}>
-                        {lvl.desc}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 2. Hierarchical Layer Tree */}
-            <div>
-              <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, fontWeight: 700 }}>
-                Spatial Representation Layers
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>
+                  Spatial Representation Layers
+                </span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    onClick={() => {
+                      Object.keys(layers).forEach(k => setLayerVisible(k, true));
+                    }}
+                    style={{
+                      background: 'rgba(59, 130, 246, 0.15)',
+                      border: `1px solid ${C.blue}`,
+                      borderRadius: 4,
+                      padding: '2px 6px',
+                      fontSize: 8,
+                      fontWeight: 600,
+                      color: C.text,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(59, 130, 246, 0.3)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(59, 130, 246, 0.15)'}
+                  >
+                    تحديد الكل
+                  </button>
+                  <button
+                    onClick={() => {
+                      Object.keys(layers).forEach(k => setLayerVisible(k, false));
+                    }}
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.15)',
+                      border: `1px solid ${C.red}`,
+                      borderRadius: 4,
+                      padding: '2px 6px',
+                      fontSize: 8,
+                      fontWeight: 600,
+                      color: C.text,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.3)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'}
+                  >
+                    إلغاء الكل
+                  </button>
+                </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {LAYER_GROUPS.map((group) => (
@@ -329,6 +336,21 @@ export default function LeftPanel() {
                                 {item.label}
                               </span>
 
+                              {/* Help Icon/Hint Toggle */}
+                              <button
+                                onClick={() => setActiveHintKey(activeHintKey === item.key ? null : item.key)}
+                                style={{
+                                  background: 'transparent', border: 'none',
+                                  color: activeHintKey === item.key ? item.color : C.muted,
+                                  cursor: 'pointer', fontSize: 9, padding: '2px 4px',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  transition: 'color 0.15s'
+                                }}
+                                title="عرض الشرح والوظيفة دلالياً"
+                              >
+                                ℹ️
+                              </button>
+ 
                               {/* Visibility */}
                               <button
                                 onClick={() => toggleLayer(item.key)}
@@ -340,7 +362,7 @@ export default function LeftPanel() {
                               >
                                 {visible ? '👁️' : '🙈'}
                               </button>
-
+ 
                               {/* Isolate */}
                               <button
                                 onClick={() => handleIsolateLayer(item.key)}
@@ -354,7 +376,7 @@ export default function LeftPanel() {
                                 ISO
                               </button>
                             </div>
-
+ 
                             {visible && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 12 }}>
                                 <span style={{ fontSize: 7, color: C.muted }}>Opacity</span>
@@ -371,6 +393,30 @@ export default function LeftPanel() {
                                   {Math.round(opacity * 100)}%
                                 </span>
                               </div>
+                            )}
+
+                            {/* Collapsible Layer Hint Block */}
+                            {activeHintKey === item.key && LAYER_HINTS[item.key] && (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                style={{
+                                  marginTop: 6,
+                                  padding: '6px 8px',
+                                  background: 'rgba(255,255,255,0.02)',
+                                  borderLeft: `2px solid ${item.color}`,
+                                  fontSize: 8,
+                                  color: '#94A3B8',
+                                  lineHeight: 1.4,
+                                  borderRadius: '0 4px 4px 0',
+                                  direction: 'rtl',
+                                }}
+                              >
+                                <div style={{ fontWeight: 700, color: '#E2E8F0', marginBottom: 2 }}>
+                                  {LAYER_HINTS[item.key].title}
+                                </div>
+                                {LAYER_HINTS[item.key].desc}
+                              </motion.div>
                             )}
                           </div>
                         );

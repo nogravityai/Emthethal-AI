@@ -35,6 +35,9 @@ services:
       - MINIO_SECRET_KEY=emthethal_secret_2026
       - MINIO_BUCKET=emthethal-originals
       - STORAGE_BACKEND=minio
+      - OLLAMA_URL=http://host.docker.internal:1234/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
@@ -57,20 +60,7 @@ services:
       dockerfile: Dockerfile
     container_name: cfis_model_init
     command: >
-      python3 -c "
-      import os, sys
-      os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
-      os.makedirs('/root/.paddleocr', exist_ok=True)
-      marker = '/root/.paddleocr/.arabic_model_ready'
-      if os.path.exists(marker):
-          print('Arabic model already downloaded. Skipping.')
-          sys.exit(0)
-      print('Downloading Arabic OCR model (one-time only)...')
-      from paddleocr import PaddleOCR
-      PaddleOCR(use_angle_cls=True, lang='arabic', use_gpu=False, show_log=False)
-      open(marker, 'w').write('ready')
-      print('Arabic model ready.')
-      "
+      python3 -c "import os, sys, numpy as np; from PIL import Image; import paddle; paddle.base.libpaddle.AnalysisConfig.set_optimization_level = lambda self, level: None; os.environ['CUDA_VISIBLE_DEVICES'] = '-1'; os.makedirs('/root/.paddleocr', exist_ok=True); marker = '/root/.paddleocr/.arabic_model_ready'; sys.exit(0) if os.path.exists(marker) else None; print('Downloading Arabic OCR model...'); from paddleocr import PaddleOCR; PaddleOCR(use_angle_cls=False, lang='arabic', use_gpu=False, show_log=False, enable_mkldnn=False); open(marker, 'w').write('ready'); print('Arabic model ready.')"
     volumes:
       - paddle_models:/root/.paddleocr
     environment:
@@ -143,6 +133,9 @@ services:
       MINIO_BUCKET: emthethal-originals
       STORAGE_BACKEND: minio
       CUDA_VISIBLE_DEVICES: "-1"
+      OLLAMA_URL: http://host.docker.internal:1234/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     volumes:
@@ -164,6 +157,9 @@ services:
       CONFIDENCE_AUTO_PASS: "0.90"
       CONFIDENCE_QA_REVIEW: "0.70"
       CUDA_VISIBLE_DEVICES: "-1"
+      OLLAMA_URL: http://host.docker.internal:1234/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./backend:/app
       - paddle_models:/root/.paddleocr

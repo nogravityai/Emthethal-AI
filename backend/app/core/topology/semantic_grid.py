@@ -155,12 +155,16 @@ class ArabicTokenComposer:
             t_h = t.bbox.y2 - t.bbox.y1
 
             for row in rows:
-                row_cy = sum((r.bbox.y1 + r.bbox.y2) / 2.0 for r in row) / len(row)
-                row_h = sum(r.bbox.y2 - r.bbox.y1 for r in row) / len(row)
-                
-                # Check baseline vertical overlap
-                overlap = max(0.0, min(t.bbox.y2, max(r.bbox.y2 for r in row)) - max(t.bbox.y1, min(r.bbox.y1 for r in row)))
-                overlap_ratio = overlap / min(t_h, row_h) if min(t_h, row_h) > 0 else 0.0
+                n = len(row)
+                row_cy = sum((r.bbox.y1 + r.bbox.y2) / 2.0 for r in row) / n
+                row_h  = sum(r.bbox.y2 - r.bbox.y1 for r in row) / n
+                row_y1 = min(r.bbox.y1 for r in row)
+                row_y2 = max(r.bbox.y2 for r in row)
+
+                # Vertical overlap between token and row band
+                overlap   = max(0.0, min(t.bbox.y2, row_y2) - max(t.bbox.y1, row_y1))
+                min_h     = min(t_h, row_h)
+                overlap_ratio = overlap / min_h if min_h > 0 else 0.0
 
                 if overlap_ratio >= self.vertical_overlap_threshold or abs(t_cy - row_cy) < (row_h * 0.45):
                     row.append(t)

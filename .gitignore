@@ -23,3 +23,12 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+.antigravity/
+.understand-anything/
+
+# Temp archives
+*.tar.xz
+
+# JSON snapshots
+pipeline_snapshot_*.json
+

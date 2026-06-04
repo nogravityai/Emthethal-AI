@@ -248,30 +248,69 @@ async def inspect_artifact(artifact_id: str):
 
 from app.services.schema.schema_builder import build_canonical_document
 from app.services.schema.adapters.formio_adapter import export_to_formio
+from app.services.schema.adapters.erpnext_adapter import export_to_erpnext
 
 @router.get("/export/{run_id}")
 async def export_run(run_id: str):
     """
-    Exports the final resolved fields into the Canonical Document Schema and Form.io format.
+    Exports resolved fields into Canonical Document, Form.io, and ERPNext formats.
+    Uses zone topology to structure the output as parent-child hierarchy.
     """
     ctx, orch = _get_run(run_id)
-    
-    # We fetch the resolved fields artifact
+
+    # ── Resolved Fields ──────────────────────────────────────────────────────
     rf_id = ctx.artifact_references.get("resolved_fields")
     if not rf_id:
         raise HTTPException(404, detail="Run has no resolved fields.")
-        
     resolved_fields = orch.store.get(rf_id).payload
-    
-    # Build Canonical
-    canonical_doc = build_canonical_document(ctx.document_id, resolved_fields)
-    
-    # Export to Form.io
-    formio_schema = export_to_formio(canonical_doc)
-    
+
+    # ── Semantic Zones (from topology) ───────────────────────────────────────
+    zones = []
+    topo_id = ctx.artifact_references.get("topology_evidence")
+    if topo_id:
+        topo_artifact = orch.store.get(topo_id)
+        if topo_artifact:
+            zones = getattr(topo_artifact.payload, "zones", []) or []
+
+    # ── OCR Tokens (for label extraction) ────────────────────────────────────
+    ocr_tokens = []
+    ocr_id = ctx.artifact_references.get("ocr_evidence")
+    if ocr_id:
+        ocr_artifact = orch.store.get(ocr_id)
+        if ocr_artifact:
+            ocr_tokens = ocr_artifact.payload or []
+
+    # ── Field Type Corrections from HITL Ledger ───────────────────────────────
+    from app.services.hitl.operations_ledger import global_operations_ledger
+    operations = global_operations_ledger.get_operations_for_run(run_id)
+    corrections = {}
+    for op in operations:
+        if getattr(op, "operation_type", None) == "field_type_correction":
+            # Using corrected_field_id if not present or field_id directly
+            fid = getattr(op, "field_id", None)
+            if fid:
+                corrections[fid] = {
+                    "corrected_type": getattr(op, "corrected_type", None),
+                    "corrected_label": getattr(op, "corrected_label", ""),
+                }
+
+    # ── Build Canonical Document ──────────────────────────────────────────────
+    canonical_doc = build_canonical_document(
+        ctx.document_id,
+        resolved_fields,
+        zones=zones,
+        ocr_tokens=ocr_tokens,
+        field_type_corrections=corrections,
+    )
+
+    # ── Export Adapters ───────────────────────────────────────────────────────
+    formio_schema   = export_to_formio(canonical_doc)
+    erpnext_schema  = export_to_erpnext(canonical_doc)
+
     return {
         "canonical_document": canonical_doc.model_dump(),
-        "formio_schema": formio_schema
+        "formio_schema": formio_schema,
+        "erpnext_schema": erpnext_schema,
     }
 
 @router.get("/runs")
@@ -434,6 +473,14 @@ async def get_debug_snapshot(run_id: str, stage: str):
             for h in payload.region_hierarchy
         ]
         snapshot["linked_checkboxes"] = payload.linked_checkboxes
+        snapshot["zones"] = getattr(payload, "zones", [])
+        if getattr(payload, "form_graph", None) is not None:
+            if hasattr(payload.form_graph, "model_dump"):
+                snapshot["form_graph"] = payload.form_graph.model_dump()
+            else:
+                snapshot["form_graph"] = payload.form_graph.dict()
+
+
     elif artifact_type == "resolved_fields":
         snapshot["field_count"] = len(payload)
         snapshot["fields"] = [

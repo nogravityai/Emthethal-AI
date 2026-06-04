@@ -164,9 +164,14 @@ class FusionEngine:
             # Generate a stable, deterministic field ID (TASK-P3-09D)
             f_id = generate_stable_id("field", cons.target_region_id, *cons.alignment_ids)
 
+            # Retrieve the target region's bbox from regions_map
+            region_ev = regions_map.get(cons.target_region_id)
+            field_bbox = region_ev.bbox if region_ev else None
+
             field = ResolvedField(
                 field_id=f_id,
                 field_type="inferred",
+                bbox=field_bbox,
                 value=relabel_op.new_value if relabel_op else None,
                 confidence_breakdown=breakdown,
                 resolved_provenance=prov,

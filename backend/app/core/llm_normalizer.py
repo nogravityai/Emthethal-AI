@@ -75,7 +75,16 @@ class LLMNormalizer:
     """
 
     def __init__(self, base_url: str = OLLAMA_BASE_URL):
-        self.api_url = f"{base_url.rstrip('/')}/api/generate"
+        self.base_url = base_url.rstrip('/')
+        if "/v1" in self.base_url or "1234" in self.base_url:
+            self.is_openai = True
+            if "/v1" not in self.base_url:
+                self.api_url = f"{self.base_url}/v1/chat/completions"
+            else:
+                self.api_url = f"{self.base_url}/chat/completions"
+        else:
+            self.is_openai = False
+            self.api_url = f"{self.base_url}/api/generate"
         self.synonym_cache: Dict[str, str] = dict(STATIC_SYNONYM_MAP)
 
     async def normalize_document(
@@ -165,24 +174,41 @@ OUTPUT FORMAT:
 
 Return a JSON mapping of each label to its canonical form."""
 
-        payload = {
-            "model": MODEL_NAME,
-            "system": system_prompt,
-            "prompt": user_prompt,
-            "stream": False,
-            "format": "json",
-            "options": {
-                "num_ctx": 4096,
-                "temperature": 0.05,  # Near-deterministic for standardization
-                "num_predict": 2048,
-            },
-        }
+        if self.is_openai:
+            payload = {
+                "model": MODEL_NAME,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "stream": False,
+                "response_format": {"type": "json_object"},
+                "temperature": 0.05,
+                "max_tokens": 2048,
+            }
+        else:
+            payload = {
+                "model": MODEL_NAME,
+                "system": system_prompt,
+                "prompt": user_prompt,
+                "stream": False,
+                "format": "json",
+                "options": {
+                    "num_ctx": 4096,
+                    "temperature": 0.05,
+                    "num_predict": 2048,
+                },
+            }
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
                 response = await client.post(self.api_url, json=payload)
                 response.raise_for_status()
-                raw = response.json().get("response", "{}")
+                res_data = response.json()
+                if self.is_openai:
+                    raw = res_data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+                else:
+                    raw = res_data.get("response", "{}")
 
                 mappings = json.loads(raw)
                 if isinstance(mappings, dict):

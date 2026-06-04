@@ -125,7 +125,7 @@ class FileExtractor:
 
             if use_paddle:
                 # Render page to image for OCR
-                pix = page.get_pixmap(dpi=200)
+                pix = page.get_pixmap(dpi=300)  # رُفعت من 200 إلى 300 لتحسين OCR العربية
                 img_bytes = pix.tobytes("png")
                 img_array = np.frombuffer(img_bytes, dtype=np.uint8)
 
@@ -138,7 +138,6 @@ class FileExtractor:
                 try:
                     results = paddle.ocr(img_np)
                     ocr_words = self._paddle_results_to_words(results)
-
                     if ocr_words:
                         # Route through Geometry Engine
                         tables = self.geometry.reconstruct_layout(ocr_words)
@@ -475,6 +474,8 @@ class FileExtractor:
             try:
                 results = paddle.ocr(img_np)
                 ocr_words = self._paddle_results_to_words(results)
+                # تصحيح أخطاء OCR العربية الشائعة
+                ocr_words = arabic_ocr_corrector.correct_word_list(ocr_words)
 
                 if ocr_words:
                     tables = self.geometry.reconstruct_layout(ocr_words)

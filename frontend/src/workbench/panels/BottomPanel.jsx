@@ -259,14 +259,119 @@ function SystemLogsView({ snapshots, runs, determinismOk }) {
 }
 
 const TABS = [
+  { key: 'zones',  label: '🏗 Zone Schema' },
   { key: 'json',   label: '📄 Canonical JSON' },
   { key: 'formio', label: '📝 Form.io Preview' },
+  { key: 'erpnext', label: '⚙ ERPNext' },
   { key: 'raw',    label: '🔬 Raw Evidence' },
   { key: 'diff',   label: '⚖ Before/After Diff' },
   { key: 'logs',   label: '📋 Logs & Warnings' },
 ];
 
-const PANEL_H = 280;
+const PANEL_H = 300;
+
+const FT_ICONS = {
+  date: '📅', checkbox: '☑', radio: '🔘', dropdown: '⬇', text: '📝',
+  name: '👤', number: '#', phone: '📞', email: '✉', signature: '✍',
+  header: '🏷', form_title: '📋', table: '📊', unknown: '❓',
+};
+
+const FT_COLORS = {
+  date: '#0EA5E9', checkbox: '#10B981', radio: '#A78BFA', dropdown: '#F59E0B',
+  text: '#64748B', name: '#3B82F6', number: '#EC4899', phone: '#06B6D4',
+  email: '#8B5CF6', signature: '#F97316', header: '#EF4444',
+  form_title: '#F43F5E', table: '#FBBF24', unknown: '#374151',
+};
+
+function ZoneSchemaView({ schema }) {
+  const doc = schema?.canonical_document;
+  if (!doc) {
+    return (
+      <div style={{ color: C.muted, fontSize: 11, textAlign: 'center', padding: 28 }}>
+        شغّل الـ pipeline أولاً لعرض Zone Schema
+      </div>
+    );
+  }
+
+  const allSections = doc.pages?.flatMap(p => p.sections) ?? [];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {/* Form title */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: `1px solid ${C.border}`, marginBottom: 8 }}>
+        <span style={{ fontSize: 14 }}>📋</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{doc.title || 'Untitled Form'}</span>
+        <span style={{ fontSize: 9, color: C.muted, fontFamily: 'monospace', marginLeft: 'auto' }}>
+          v{doc.schema_version} · {allSections.length} zones
+        </span>
+      </div>
+
+      {/* Sections (zones) */}
+      {allSections.map((sec, si) => {
+        const included = sec.include_in_form !== false;
+        const secColor = included ? C.green : C.red;
+        const fieldCount = sec.fields?.length ?? 0;
+
+        return (
+          <div key={sec.section_id || si} style={{
+            background: C.bg, borderRadius: 8,
+            border: `1px solid ${included ? C.border : C.red + '40'}`,
+            overflow: 'hidden', marginBottom: 6,
+          }}>
+            {/* Zone header */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '7px 12px', borderBottom: fieldCount > 0 ? `1px solid ${C.border}` : 'none',
+              background: included ? `${C.green}08` : `${C.red}08`,
+            }}>
+              <span style={{ fontSize: 10, color: secColor, fontWeight: 800 }}>{included ? '🟢' : '🔴'}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: C.text }}>{sec.title}</span>
+              <span style={{ fontSize: 9, color: C.muted, fontFamily: 'monospace' }}>{sec.zone_type}</span>
+              <span style={{ fontSize: 9, color: C.muted, marginLeft: 'auto' }}>{fieldCount} حقل</span>
+              {!included && (
+                <span style={{ fontSize: 8, color: C.red, background: `${C.red}20`, borderRadius: 3, padding: '1px 5px', fontWeight: 700 }}>EXCLUDED</span>
+              )}
+            </div>
+
+            {/* Child fields */}
+            {sec.fields?.map((field, fi) => {
+              const ft = field.field_type || 'text';
+              const icon = FT_ICONS[ft] || '❓';
+              const color = FT_COLORS[ft] || C.muted;
+              const isLast = fi === sec.fields.length - 1;
+              return (
+                <div key={field.field_id || fi} style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '5px 16px',
+                  borderBottom: !isLast ? `1px solid ${C.border}40` : 'none',
+                }}>
+                  <span style={{ color: C.muted, fontSize: 9, width: 12 }}>{'└─'}</span>
+                  <span style={{ fontSize: 11 }}>{icon}</span>
+                  <span style={{
+                    fontSize: 9, fontWeight: 600,
+                    background: `${color}18`, color, borderRadius: 3,
+                    padding: '1px 5px', fontFamily: 'monospace', minWidth: 60, textAlign: 'center',
+                  }}>{ft}</span>
+                  <span style={{ fontSize: 10, color: C.text, direction: 'rtl', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {field.field_name}
+                  </span>
+                  {field.value !== null && field.value !== undefined && (
+                    <span style={{ fontSize: 9, color: C.muted, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', direction: 'rtl' }}>
+                      {String(field.value)}
+                    </span>
+                  )}
+                  <span style={{ fontSize: 8, fontFamily: 'monospace', color: C.muted, minWidth: 30, textAlign: 'right' }}>
+                    {((field.confidence_score || 0) * 100).toFixed(0)}%
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function BottomPanel() {
   const { activeTab, setActiveTab, schema, snapshots, runs, determinismOk, isBottomCollapsed, setBottomCollapsed } = useWorkbenchStore();
@@ -326,24 +431,55 @@ export default function BottomPanel() {
             </span>
             <button
               id="export-json-btn"
-              aria-label="Export JSON"
+              aria-label="Export Canonical JSON"
               onClick={() => {
-                const blob = new Blob([JSON.stringify(schema, null, 2)], { type: 'application/json' });
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = `cfis_export_${Date.now()}.json`;
-                a.click();
+                const blob = new Blob([JSON.stringify(schema.canonical_document, null, 2)], { type: 'application/json' });
+                const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+                a.download = `cfis_canonical_${Date.now()}.json`; a.click();
               }}
-              style={{ fontSize: 10, padding: '4px 10px', borderRadius: 5, border: `1px solid ${C.border}`, background: C.bg, color: C.muted, cursor: 'pointer' }}
+              style={{ fontSize: 10, padding: '3px 8px', borderRadius: 5, border: `1px solid ${C.border}`, background: C.bg, color: C.muted, cursor: 'pointer' }}
             >
-              ↓ Export JSON
+              ↓ JSON
             </button>
+            {schema.erpnext_schema && (
+              <button
+                id="export-erpnext-btn"
+                aria-label="Export ERPNext DocType"
+                onClick={() => {
+                  const blob = new Blob([JSON.stringify(schema.erpnext_schema, null, 2)], { type: 'application/json' });
+                  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+                  a.download = `erpnext_doctype_${Date.now()}.json`; a.click();
+                }}
+                style={{ fontSize: 10, padding: '3px 8px', borderRadius: 5, border: `1px solid #10B98140`, background: '#10B98112', color: '#10B981', cursor: 'pointer', fontWeight: 600 }}
+              >
+                ↓ ERPNext
+              </button>
+            )}
+            {schema.formio_schema && (
+              <button
+                id="export-formio-btn"
+                aria-label="Export Form.io Schema"
+                onClick={() => {
+                  const blob = new Blob([JSON.stringify(schema.formio_schema, null, 2)], { type: 'application/json' });
+                  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+                  a.download = `formio_schema_${Date.now()}.json`; a.click();
+                }}
+                style={{ fontSize: 10, padding: '3px 8px', borderRadius: 5, border: `1px solid #3B82F640`, background: '#3B82F612', color: '#3B82F6', cursor: 'pointer', fontWeight: 600 }}
+              >
+                ↓ Form.io
+              </button>
+            )}
           </div>
         )}
       </div>
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
+
+        {/* ── ZONE SCHEMA ─────────────────────────────────────── */}
+        {activeTab === 'zones' && (
+          <ZoneSchemaView schema={schema} />
+        )}
 
         {/* ── CANONICAL JSON ─────────────────────────────────────────── */}
         {activeTab === 'json' && (
@@ -354,6 +490,19 @@ export default function BottomPanel() {
           ) : (
             <div style={{ color: C.muted, fontSize: 11, textAlign: 'center', padding: 28 }}>
               Run the pipeline to see the Canonical Document schema
+            </div>
+          )
+        )}
+
+        {/* ── ERPNEXT ────────────────────────────────────────────── */}
+        {activeTab === 'erpnext' && (
+          schema?.erpnext_schema ? (
+            <pre style={{ background: C.bg, borderRadius: 8, padding: 14, border: `1px solid ${C.border}`, fontSize: 9, fontFamily: 'monospace', color: C.text, overflow: 'auto', maxHeight: 220, lineHeight: 1.6 }}>
+              <JsonTree data={schema.erpnext_schema} />
+            </pre>
+          ) : (
+            <div style={{ color: C.muted, fontSize: 11, textAlign: 'center', padding: 28 }}>
+              شغّل الـ pipeline لعرض ERPNext DocType schema
             </div>
           )
         )}

@@ -76,6 +76,7 @@ class SpatialRegionEvidence(BaseModel):
     pipeline_version: str = "3.0.0"
 
     # Semantic/Topology properties
+    region_type: Optional[str] = "table"
     logical_row_id: Optional[str] = None
     logical_col_id: Optional[str] = None
     logical_cell_id: Optional[str] = None

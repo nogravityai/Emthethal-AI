@@ -8,6 +8,8 @@ const defaultLayers = {
   coordinate_space: true,
   shapes:    true,
   topology:  true,
+  zones:     true,
+  formGraph: true,
   alignment: false,
   conflict:  false,
   orphan:    false,
@@ -23,6 +25,8 @@ const defaultOpacities = {
   coordinate_space: 0.25,
   shapes:    0.7,
   topology:  0.4,
+  zones:     0.75,
+  formGraph: 0.75,
   alignment: 0.6,
   conflict:  0.8,
   orphan:    0.7,
@@ -45,6 +49,8 @@ export const LAYER_META = {
   coordinate_space: { label: 'Coordinate Spaces', color: '#06B6D4', shortcut: '3', stageKey: 'coordinate_space_evidence' },
   shapes:           { label: 'Primitive Contours',color: '#F59E0B', shortcut: '4', stageKey: 'shape_evidence' },
   topology:         { label: 'Table Topology',    color: '#FBBF24', shortcut: '5', stageKey: 'topology_evidence' },
+  zones:            { label: 'Semantic Zones',    color: '#F43F5E', shortcut: 'z', stageKey: 'topology_evidence' },
+  formGraph:        { label: 'Form Graph',        color: '#A855F7', shortcut: 'g', stageKey: 'topology_evidence' },
   alignment:        { label: 'Alignment Edges',   color: '#EC4899', shortcut: '6', stageKey: 'alignment_evidence' },
   conflict:         { label: 'Conflict Edges',    color: '#EF4444', shortcut: '7', stageKey: 'alignment_evidence' },
   orphan:           { label: 'Orphan Tokens',     color: '#F97316', shortcut: '8', stageKey: 'alignment_evidence' },
@@ -60,10 +66,10 @@ export const ALIGNMENT_TYPES = {
 };
 export const IR_STAGE_LAYERS = {
   raw_geometry:     ['shapes', 'geometry'],
-  structural:       ['shapes', 'geometry', 'topology'],
+  structural:       ['shapes', 'geometry', 'topology', 'zones', 'formGraph'],
   coordinate:       ['coordinate_space', 'shapes'],
-  cognitive:        ['ocr', 'geometry', 'alignment', 'fusion'],
-  reasoning:        ['fusion', 'topology'],
+  cognitive:        ['ocr', 'geometry', 'alignment', 'fusion', 'zones', 'formGraph'],
+  reasoning:        ['fusion', 'topology', 'zones', 'formGraph'],
 };
 
 // Backend HITL stage names (from orchestration.py pipeline stages)
@@ -115,7 +121,7 @@ export const useWorkbenchStore = create(
 
     // ── Compare mode ─────────────────────────────────────────────────────────
     compareMode: false,
-    compareSnapshots: { ocr: null, geometry: null, alignment: null, fusion: null },
+    compareSnapshots: { ocr: null, geometry: null, topology: null, alignment: null, fusion: null, coordinate_space: null, shapes: null },
     compareRunId: null,
 
     // ── Canvas / viewer state ─────────────────────────────────────────────────
@@ -137,13 +143,28 @@ export const useWorkbenchStore = create(
     
     // ── Spatial IDE additions ──
     workspaceMode: 'debug', // 'debug' | 'inspect' | 'replay' | 'chart'
+    drawingMode: false,     // Drawing new zones mode
     isBottomCollapsed: false,
     isLeftCollapsed: false,
     isRightCollapsed: false,
 
+    // ── Zone field corrections (local overrides before API call) ────────────
+    // { [zoneId]: { [fieldId]: { type: string, label: string } } }
+    zoneFieldCorrections: {},
+
+    // ── Smart Calibration (SmartZoneDiscoveryEngine) ─────────────────────────
+    // When enabled: every zone resize/drag in the canvas emits CALIBRATE_COORDINATES
+    // via the HITL ledger, and the backend applies drift correction on rerun.
+    smartCalibrationEnabled: false,
+    // { [zone_id]: { dx: number, dy: number, anchor_word_ids: string[] } }
+    calibrationVectors: {},
+
     // =========================================================================
     //  Actions
     // =========================================================================
+
+    setDrawingMode: (mode) =>
+      set(s => { s.drawingMode = mode; }),
 
     setWorkspaceMode: (mode) =>
       set(s => { s.workspaceMode = mode; }),
@@ -156,6 +177,32 @@ export const useWorkbenchStore = create(
 
     setRightCollapsed: (collapsed) =>
       set(s => { s.isRightCollapsed = collapsed; }),
+
+    // ── Zone field correction actions ────────────────────────────────────────
+    setZoneFieldCorrection: (zoneId, fieldId, correction) =>
+      set(s => {
+        if (!s.zoneFieldCorrections[zoneId]) s.zoneFieldCorrections[zoneId] = {};
+        s.zoneFieldCorrections[zoneId][fieldId] = { ...correction };
+      }),
+
+    clearZoneCorrections: (zoneId) =>
+      set(s => {
+        if (zoneId) {
+          delete s.zoneFieldCorrections[zoneId];
+        } else {
+          s.zoneFieldCorrections = {};
+        }
+      }),
+
+    // ── Smart Calibration actions ─────────────────────────────────────────────
+    toggleSmartCalibration: () =>
+      set(s => { s.smartCalibrationEnabled = !s.smartCalibrationEnabled; }),
+
+    setCalibrationVector: (zoneId, vector) =>
+      set(s => { s.calibrationVectors[zoneId] = vector; }),
+
+    clearCalibrationVectors: () =>
+      set(s => { s.calibrationVectors = {}; }),
 
     setLoading: (loading, status = '') =>
       set(s => { s.loading = loading; s.status = status; }),
@@ -253,7 +300,7 @@ export const useWorkbenchStore = create(
     setCompareMode: (on) =>
       set(s => {
         s.compareMode = on;
-        if (!on) { s.compareRunId = null; s.compareSnapshots = { ocr: null, geometry: null, alignment: null, fusion: null }; }
+        if (!on) { s.compareRunId = null; s.compareSnapshots = { ocr: null, geometry: null, topology: null, alignment: null, fusion: null, coordinate_space: null, shapes: null }; }
       }),
 
     setCompareSnapshots: ({ run_id, snapshots }) =>
@@ -286,6 +333,9 @@ export const useWorkbenchStore = create(
         s.isBottomCollapsed = false;
         s.isLeftCollapsed = false;
         s.isRightCollapsed = false;
+        s.zoneFieldCorrections = {};
+        s.smartCalibrationEnabled = false;
+        s.calibrationVectors = {};
       }),
   }))
 );

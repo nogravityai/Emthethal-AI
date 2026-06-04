@@ -61,7 +61,11 @@ def normalize_geometry_output(raw_geometry: Dict[str, Any]) -> Dict[str, List[An
         evidence_boxes.append(box_ev)
         
         # Explicit 1:1 Region mapping for Assignment Engine targets
-        evidence_regions.append(SpatialRegionEvidence.create_from_box(box_ev))
+        region_ev = SpatialRegionEvidence.create_from_box(box_ev)
+        raw_type = b.get("box_type") or b.get("region_type")
+        if raw_type:
+            region_ev = region_ev.model_copy(update={"region_type": raw_type})
+        evidence_regions.append(region_ev)
         
     return {
         "lines": evidence_lines,
