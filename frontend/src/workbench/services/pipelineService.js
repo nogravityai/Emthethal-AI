@@ -43,9 +43,9 @@ export const pipelineService = {
     return data;
   },
 
-  /** Fetch all 7 snapshots in parallel */
+  /** Fetch all 8 snapshots in parallel */
   getAllSnapshots: async (run_id) => {
-    const [ocr, geometry, topology, alignment, fusion, coordinate_space, shapes] = await Promise.allSettled([
+    const [ocr, geometry, topology, alignment, fusion, coordinate_space, shapes, semantic_form_graph] = await Promise.allSettled([
       pipelineService.getSnapshot(run_id, 'ocr'),
       pipelineService.getSnapshot(run_id, 'geometry'),
       pipelineService.getSnapshot(run_id, 'topology'),
@@ -53,6 +53,7 @@ export const pipelineService = {
       pipelineService.getSnapshot(run_id, 'fusion'),
       pipelineService.getSnapshot(run_id, 'coordinate_space'),
       pipelineService.getSnapshot(run_id, 'shapes'),
+      pipelineService.getSnapshot(run_id, 'semantic_form_graph'),
     ]);
     return {
       ocr: ocr.status === 'fulfilled' ? ocr.value : null,
@@ -62,6 +63,7 @@ export const pipelineService = {
       fusion: fusion.status === 'fulfilled' ? fusion.value : null,
       coordinate_space: coordinate_space.status === 'fulfilled' ? coordinate_space.value : null,
       shapes: shapes.status === 'fulfilled' ? shapes.value : null,
+      semantic_form_graph: semantic_form_graph.status === 'fulfilled' ? semantic_form_graph.value : null,
     };
   },
 

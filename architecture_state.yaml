@@ -3,11 +3,11 @@
 # Never delete completed task entries.
 
 cfis_state:
-  prompt_version: "5.0"
+  prompt_version: "5.2"
   schema_version: "2"
   pipeline_version: "3"
-  last_task_completed: "TASK-11"
-  last_updated: "2026-05-19T07:26:00+03:00"
+  last_task_completed: "CFIS-P4-INTEGRATION"
+  last_updated: "2026-06-05T03:15:56+03:00"
 
   locations:
     canonical_schema: "backend/app/models/schemas.py"
@@ -23,6 +23,13 @@ cfis_state:
     qa_viewer: "frontend/src/components/QAViewer.jsx"
     dockerfile: "backend/Dockerfile"
     docker_compose: "docker-compose.yml"
+    semantic_models: "backend/app/core/forms/models.py"
+    table_grid_builder: "backend/app/core/forms/grid_table_structure_builder.py"
+    question_binder: "backend/app/core/forms/question_control_binder.py"
+    semantic_graph_builder: "backend/app/core/forms/semantic_form_graph_builder.py"
+    compiler_engine: "backend/app/core/forms/compiler.py"
+    workbench_viewer: "frontend/src/workbench/panels/DocumentViewer.jsx"
+    workbench_panel: "frontend/src/workbench/panels/BottomPanel.jsx"
 
   extraction_capabilities:
     native_text_extraction: true    # pdfplumber NOW installed in rebuilt image
@@ -38,6 +45,7 @@ cfis_state:
     - "OCR-primary extraction (R16 violation): fixed with native-first hybrid_extraction.py"
     - "Multiple BaseModel schema files: consolidated to single app/models/schemas.py"
     - "Arabic OCR model download: first run triggers download (~500MB); use model_init service in production"
+    - "Unregistered semantic_form_graph artifact: fixed by calling context.register_artifact in stage.py, enabling clean API export without legacy fallback"
 
   open_issues:
     - "Arabic OCR model download: first run triggers download (~500MB); use model_init service in production"
@@ -55,6 +63,7 @@ cfis_state:
     cfis_router: "PASS — 9 routes registered at /api/cfis/v1/"
     legacy_orm: "PASS — checklist_templates table name confirmed"
     rq_worker: "PASS — no psycopg2 error, listening on 3 queues"
+    semantic_form_graph_regression_suite: "PASS — 6/6 test cases succeeded inside container"
 
   tasks_completed:
     - task: "TASK-01"
@@ -172,13 +181,37 @@ cfis_state:
         Verified server compilation compiles 100% successfully.
       verified: true
 
+    - task: "CFIS-P4-PHASE-1"
+      summary: |
+        Implemented Phase 1 tactical fixes for Layout and Topology reconstruction:
+        1. Spatial IoU Deduplication in stage.py to flag micro-regions (w < 60, h < 60) without deletion.
+        2. Alignment candidate scoring for Table Resolver replacing the coarse blacklist.
+        3. RTL-aware 3-level checkbox option label fallback adjacent search (RTL Adjacent -> Anchor -> Pair ID).
+        4. Multi-signal Section Header Classifier (layout, spacing, regex, word count) replacing width heuristic.
+        5. Arabic diacritics stripping, Alif/Taa Marbuta normalization, and numeric hints mapping for empty fields.
+        6. Expanded snap bounds (max_y_gap=35) and upward column-header matching (max_above=80).
+      verified: true
+
+    - task: "CFIS-P4-PHASE-2"
+      summary: |
+        Implemented Phase 2 Form Understanding layer and registered SemanticFormGraph:
+        1. Defined Pydantic models for SemanticField, SemanticSection, and SemanticFormGraph.
+        2. Created GridTableStructureBuilder for spatial cell-alignment clustering (primary) and line snapping (secondary).
+        3. Created QuestionControlBinder for checkbox/radio option grouping and RTL question text reconstruction.
+        4. Created SemanticFormGraphBuilder to compile logical components into a single source of truth graph.
+        5. Integrated SemanticFormGraph into the stage execution and schema_builder.py export adapters.
+        6. Fixed a critical pipeline context registration bug to prevent legacy fallback, ensuring SemanticFormGraph is correctly output.
+        7. Verified 6/6 regression test cases passing successfully inside the docker container.
+      verified: true
+
   tasks_remaining: []
 
   definition_of_done:
-    checks_total: 18
-    checks_passed: 17
+    checks_total: 20
+    checks_passed: 20
     checks_failed: 0
     phase_1_status: "COMPLETE"
+    phase_2_status: "COMPLETE"
     note: |
-      All 11 tasks executed. CFIS Phase 1 (PDFProcessor), Phase 2 (GeometryDebugViewer), and Phase 3 (EvidenceWorkbench) are 100% clean and isolated.
-      Codebase is fully prepared, decoupled, and waiting for the next development phase: the Structural Topology Layer.
+      All tasks executed. CFIS Phase 1, Phase 2, Phase 3, and the newly established Phase 2 Form Understanding (SemanticFormGraph) layer are fully integrated and verified deterministic.
+

@@ -816,12 +816,15 @@ class ZoneTypeClassifierEngine:
     """
 
     # ── أنماط عناوين الأقسام ──────────────────────────────────────────────────
+    # [REVISED] Conservative patterns only — do NOT add generic words like عنوان/حالة/مكان/نوع
+    # which appear in questions too and cause false positives.
     _SECTION_PATTERNS = [
         re.compile(r'^\d+[\.\-\)]\s*', re.UNICODE),           # "1." "2-" "3)"
         re.compile(r'^(القسم|البند|الجزء|الفصل)\s*', re.UNICODE),
         re.compile(r'^(أولاً|ثانياً|ثالثاً|رابعاً|خامساً)\s*', re.UNICODE),
-        re.compile(r'^(بيانات|معلومات|تفاصيل)\s+', re.UNICODE),  # "بيانات المريض"
+        re.compile(r'^(بيانات|معلومات|تفاصيل)\s+', re.UNICODE),
     ]
+    _SECTION_SCORE_THRESHOLD = 0.60
 
     # ── كلمات مفتاحية للتوقيع والتذييل ────────────────────────────────────────
     _SIGNATURE_KW = frozenset(['التوقيع', 'توقيع', 'الختم', 'ختم', 'Signature', 'اعتمد', 'المراجع'])
@@ -889,6 +892,56 @@ class ZoneTypeClassifierEngine:
 
     # ── منطق التصنيف الداخلي ─────────────────────────────────────────────────
 
+    def _section_header_score(
+        self,
+        zone,
+        ocr_words: list,
+        page_width: float = 1200.0,
+    ) -> float:
+        """
+        Multi-signal score for SECTION_HEADER classification.
+        Returns float in [0.0, 1.0]. Threshold: 0.60.
+
+        Signals (weighted):
+          text_pattern  : matches _SECTION_PATTERNS (conservative)  -> 0.25
+          layout_width  : zone > 40% of page width                  -> 0.25
+          isolated_line : zone height < 45px                        -> 0.20
+          whitespace    : gap above or below > 20px                 -> 0.15
+          word_count    : 1-6 words                                 -> 0.15
+        """
+        zone_words = [
+            w for w in ocr_words
+            if zone.bbox.intersection_area(w.bbox) > 0 or zone.bbox.contains(w.bbox)
+        ]
+        full_text = " ".join(w.text for w in zone_words).strip()
+        zone_w = zone.bbox.x_max - zone.bbox.x_min
+        zone_h = zone.bbox.y_max - zone.bbox.y_min
+        score = 0.0
+
+        # Signal 1: conservative text pattern match
+        if any(p.search(full_text) for p in self._SECTION_PATTERNS):
+            score += 0.25
+
+        # Signal 2: layout width > 40% of page
+        if page_width > 0 and zone_w / page_width > 0.40:
+            score += 0.25
+
+        # Signal 3: isolated narrow line
+        if zone_h < 45:
+            score += 0.20
+
+        # Signal 4: whitespace above/below (stored by SmartZoneDiscoveryEngine)
+        whitespace_above = zone.metadata.get("whitespace_above_px", 0) if zone.metadata else 0
+        whitespace_below = zone.metadata.get("whitespace_below_px", 0) if zone.metadata else 0
+        if whitespace_above > 20 or whitespace_below > 20:
+            score += 0.15
+
+        # Signal 5: word count 1-6
+        if 1 <= len(zone_words) <= 6:
+            score += 0.15
+
+        return score
+
     def _classify(
         self,
         zone: SemanticZone,
@@ -921,9 +974,10 @@ class ZoneTypeClassifierEngine:
         full_text = " ".join(w.text for w in zone_words).strip()
         first_word = zone_words[0].text.strip() if zone_words else ""
 
-        # 3. فحص عناوين الأقسام
+        # 3. فحص عناوين الأقسام — now handled by multi-signal score in step 6
+        # (kept here as an early-exit for very strong pattern matches only)
         for pattern in self._SECTION_PATTERNS:
-            if pattern.search(full_text):
+            if pattern.search(full_text) and len(zone_words) <= 6:
                 return ZoneType.SECTION_HEADER
 
         # 4. فحص التوقيع
@@ -936,12 +990,11 @@ class ZoneTypeClassifierEngine:
             if kw in full_text:
                 return ZoneType.FOOTER
 
-        # 6. Zone عريضة (> 60% من عرض الصفحة) → على الأرجح header أو free_text
+        # 6. [REVISED] Multi-signal section header scoring (replaces simple width heuristic)
         zone_width = zone.bbox.x_max - zone.bbox.x_min
         zone_height = zone.bbox.y_max - zone.bbox.y_min
 
-        if zone_width > 400 and len(zone_words) <= 4:
-            # عنوان قصير عريض = section header
+        if self._section_header_score(zone, ocr_words) >= self._SECTION_SCORE_THRESHOLD:
             return ZoneType.SECTION_HEADER
 
         if len(zone_words) > 8 and zone_width > 200:
@@ -1196,8 +1249,50 @@ class StructuralSemanticCompilerEngine:
                 )
                 graph.sections.append(section)
 
+    def _resolve_checkbox_label(
+        self,
+        p,
+        checkbox_bbox,
+        words_lookup: dict,
+        ocr_words: list,
+    ) -> str:
+        """
+        Three-level fallback for resolving a checkbox option label:
+          1. Nearest OCR token adjacent to the checkbox (left side in image = right in RTL reading)
+          2. question_anchor_id text from words_lookup
+          3. pair_id (last resort)
+        """
+        if checkbox_bbox is not None:
+            cx1 = checkbox_bbox.x_min
+            cy1 = checkbox_bbox.y_min
+            cx2 = checkbox_bbox.x_max
+            cy2 = checkbox_bbox.y_max
+            ch = max(1, cy2 - cy1)
+            adjacent = []
+            for w in (ocr_words or []):
+                # Token to the LEFT of checkbox in image coords (= right in RTL reading order)
+                if w.bbox.x_max <= cx1 and abs((w.bbox.y_min + w.bbox.y_max) / 2 - (cy1 + cy2) / 2) < ch:
+                    dist = cx1 - w.bbox.x_max
+                    adjacent.append((dist, w.text))
+            if adjacent:
+                adjacent.sort(key=lambda x: x[0])
+                return adjacent[0][1]
+
+        # Fallback 2: question_anchor_id lookup
+        anchor_text = words_lookup.get(p.question_anchor_id)
+        if anchor_text:
+            return anchor_text
+
+        # Fallback 3: pair_id last resort
+        return p.pair_id
+
     def _run_option_clustering_pass(self, state: PageCompilationState, graph: FormGraph, line_height: float):
         prim_types = {p.primitive_id: p.primitive_type for p in state.visual_primitives}
+        # Build word ID -> text lookup for checkbox label resolution
+        words_lookup = {
+            w.word_id: w.text
+            for w in (state.ocr_evidence.words if state.ocr_evidence else [])
+        }
         
         checkbox_pairs = []
         for pair in state.linked_fields:
@@ -1277,11 +1372,10 @@ class StructuralSemanticCompilerEngine:
                 child_ids = []
                 for p in group:
                     child_vb = bbox_lookup.get(p.answer_node_id)
-                    label_text = p.pair_id
-                    if "_" in label_text:
-                        parts = label_text.split("_")
-                        if len(parts) > 1:
-                            label_text = parts[1]
+                    label_text = self._resolve_checkbox_label(
+                        p, child_vb, words_lookup,
+                        state.ocr_evidence.words if state.ocr_evidence else []
+                    )
                     
                     child_id = generate_stable_element_id(
                         page_id=state.page_metadata.page_id,
@@ -1447,11 +1541,12 @@ class StructuralSemanticCompilerEngine:
                 if not val_bbox:
                     continue
                     
-                label_text = pair.pair_id
-                if "_" in label_text:
-                    parts = label_text.split("_")
-                    if len(parts) > 1:
-                        label_text = parts[1]
+                # Use anchor word text as label; fall back to pair_id
+                _w_lookup = {
+                    w.word_id: w.text
+                    for w in (state.ocr_evidence.words if state.ocr_evidence else [])
+                }
+                label_text = _w_lookup.get(pair.question_anchor_id) or pair.pair_id
                         
                 field_id = generate_stable_element_id(
                     page_id=state.page_metadata.page_id,

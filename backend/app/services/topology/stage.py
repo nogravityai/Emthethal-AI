@@ -17,6 +17,46 @@ from app.services.topology.models import TopologyEvidencePayload
 
 logger = logging.getLogger(__name__)
 
+
+def _iou(b1, b2) -> float:
+    """Compute Intersection-over-Union for two bounding boxes."""
+    ix1 = max(b1.x1, b2.x1); iy1 = max(b1.y1, b2.y1)
+    ix2 = min(b1.x2, b2.x2); iy2 = min(b1.y2, b2.y2)
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    if inter == 0.0:
+        return 0.0
+    area1 = max(1.0, (b1.x2 - b1.x1) * (b1.y2 - b1.y1))
+    area2 = max(1.0, (b2.x2 - b2.x1) * (b2.y2 - b2.y1))
+    return inter / (area1 + area2 - inter)
+
+
+def _deduplicate_regions(regions):
+    """
+    IoU-based deduplication pass.
+    - Micro-regions (w<60 AND h<60) are kept in the graph but flagged
+      so downstream zone-generation can skip them.
+    - Normal-sized regions with IoU >= 0.8 against an already-kept
+      normal region are dropped (duplicate contour noise).
+    Returns: (deduplicated_regions, micro_region_ids)
+    """
+    micro_region_ids = set()
+    kept = []
+    for reg in regions:
+        w = reg.bbox.x2 - reg.bbox.x1
+        h = reg.bbox.y2 - reg.bbox.y1
+        reg_id = getattr(reg, 'stable_id', id(reg))
+        if w < 60 and h < 60:
+            # Keep as primitive but mark for zone-generation exclusion
+            micro_region_ids.add(reg_id)
+            kept.append(reg)
+            continue
+        # Check against already-kept normal-sized regions only
+        normal_kept = [k for k in kept if getattr(k, 'stable_id', id(k)) not in micro_region_ids]
+        if not any(_iou(reg.bbox, k.bbox) >= 0.8 for k in normal_kept):
+            kept.append(reg)
+    return kept, micro_region_ids
+
+
 class TopologyStage(PipelineStage):
     """
     Topology Reconstruction Pipeline Stage.
@@ -41,6 +81,10 @@ class TopologyStage(PipelineStage):
         lines = geom_art.payload.get("lines", [])
         regions = geom_art.payload.get("regions", [])
         boxes = geom_art.payload.get("boxes", [])
+
+        # IoU deduplication: remove duplicate contour regions; keep micro-regions as primitives
+        regions, _micro_region_ids = _deduplicate_regions(regions)
+        logger.info(f"Dedup: {len(regions)} regions kept, {len(_micro_region_ids)} micro-regions flagged.")
 
         page_num = getattr(context, "page_number", 1)
 
@@ -126,6 +170,9 @@ class TopologyStage(PipelineStage):
         # Create initial zones from geometry regions
         zones = []
         for reg in regions:
+            # Skip micro-regions — they remain as Primitives but do NOT become SemanticZones
+            if getattr(reg, 'stable_id', id(reg)) in _micro_region_ids:
+                continue
             w = reg.bbox.x2 - reg.bbox.x1
             h = reg.bbox.y2 - reg.bbox.y1
             
@@ -432,6 +479,7 @@ class TopologyStage(PipelineStage):
                 )
 
                 # Compile structural semantic FormGraph
+                compiled_state = None
                 try:
                     compiler = StructuralSemanticCompilerEngine()
                     compiled_state = compiler.run(smart_state)
@@ -459,9 +507,43 @@ class TopologyStage(PipelineStage):
             derived_from=[geom_art.artifact_id, ocr_art.artifact_id],
             payload=payload
         )
+
+        if compiled_state is not None:
+            try:
+                from app.core.forms.grid_table_structure_builder import GridTableStructureBuilder
+                from app.core.forms.question_control_binder import QuestionControlBinder
+                from app.core.forms.semantic_form_graph_builder import SemanticFormGraphBuilder
+
+                grid_builder = GridTableStructureBuilder()
+                logical_tables = grid_builder.build(
+                    regions=regions,
+                    page_w=page_w,
+                    page_h=page_h,
+                    lines=lines,
+                )
+
+                qcb = QuestionControlBinder()
+                bound_questions = qcb.bind(compiled_state, logical_tables)
+
+                sfg_builder = SemanticFormGraphBuilder()
+                semantic_graph = sfg_builder.build(compiled_state, logical_tables, bound_questions)
+
+                # Persist as named artifact
+                sfg_art_id = generate_stable_id("semantic_form_graph", topo_art_id)
+                store.save(PipelineArtifact(
+                    artifact_id=sfg_art_id,
+                    artifact_type="semantic_form_graph",
+                    derived_from=[topo_art_id],
+                    payload=semantic_graph.dict()
+                ))
+                context.register_artifact("semantic_form_graph", sfg_art_id)
+                logger.info("SemanticFormGraph successfully created and saved.")
+            except Exception as sfg_err:
+                logger.error(f"Failed to build SemanticFormGraph: {sfg_err}")
         
         logger.info(f"TopologyStage completed: resolved {len(table_topologies)} tables, {len(hierarchy_records)} hierarchy nodes, linked {len(linked_checkboxes)} checkboxes, compiled {len(zones)} zones.")
         return topo_artifact
+
 
 
     def _group_tokens_into_rows(self, tokens: List[Any], row_height_threshold: float = 12.0) -> List[List[Any]]:

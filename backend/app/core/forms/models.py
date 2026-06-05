@@ -981,4 +981,54 @@ class PageCompilationState(BaseModel):
     state_hash: Optional[str] = None  # recomputed after every LedgerOperationEngine commit (closes Gap#20)
     draft_operations: List[DraftOperation] = Field(default_factory=list)  # uncommitted HITL drafts (closes Gap#24)
     form_graph: Optional[FormGraph] = None
+    semantic_form_graph: Optional[SemanticFormGraph] = None
 
+
+# ────────────────────────────────────────────────────────────
+# SEMANTIC FORM GRAPH  — Phase 2 Form Understanding Layer
+# ────────────────────────────────────────────────────────────
+
+class SemanticField(BaseModel):
+    """
+    A single field in the Semantic Form Graph.
+    Produced by SemanticFormGraphBuilder from BoundQuestions and LogicalTable cells.
+    The label is the raw Arabic/English string as it appears on the form.
+    """
+    field_id: str
+    label: str                          # Arabic label as-is (e.g. "عمر المتوفاة")
+    field_type: str                     # "text" | "number" | "enum" | "date" | "signature"
+    options: List[str] = Field(default_factory=list)  # for enum fields
+    bbox: BoundingBox
+    section_id: Optional[str] = None
+    source: str = "unknown"             # "bound_question" | "table_cell" | "free_field"
+
+
+class SemanticSection(BaseModel):
+    """
+    A logical section grouping SemanticFields.
+    Derived from FormGraph sections detected by ZoneTypeClassifierEngine.
+    """
+    section_id: str
+    label: str
+    fields: List[SemanticField] = Field(default_factory=list)
+    bbox: BoundingBox
+    zone_type: str = "unknown"
+    include_in_form: bool = True
+
+
+class SemanticFormGraph(BaseModel):
+    """
+    The Single Source of Truth for the Schema Builder in Phase 2.
+
+    Produced by SemanticFormGraphBuilder by combining:
+      - FormGraph sections (from StructuralSemanticCompilerEngine)
+      - BoundQuestions (from QuestionControlBinder)
+      - LogicalTable cells (from GridTableStructureBuilder)
+
+    SemanticFormGraph is persisted as a named artifact (type="semantic_form_graph")
+    in the ArtifactStore for debugging, regression testing, and model evaluation.
+    It is NOT stored only transiently on PageCompilationState.
+    """
+    page_id: str
+    sections: List[SemanticSection] = Field(default_factory=list)
+    unassigned_fields: List[SemanticField] = Field(default_factory=list)

@@ -294,6 +294,18 @@ async def export_run(run_id: str):
                     "corrected_label": getattr(op, "corrected_label", ""),
                 }
 
+    # ── Semantic Form Graph ──────────────────────────────────────────────────
+    semantic_graph = None
+    sfg_id = ctx.artifact_references.get("semantic_form_graph")
+    if sfg_id:
+        sfg_artifact = orch.store.get(sfg_id)
+        if sfg_artifact:
+            from app.core.forms.models import SemanticFormGraph
+            try:
+                semantic_graph = SemanticFormGraph.model_validate(sfg_artifact.payload)
+            except Exception as e:
+                logger.error(f"Failed to validate semantic form graph payload: {e}")
+
     # ── Build Canonical Document ──────────────────────────────────────────────
     canonical_doc = build_canonical_document(
         ctx.document_id,
@@ -301,7 +313,9 @@ async def export_run(run_id: str):
         zones=zones,
         ocr_tokens=ocr_tokens,
         field_type_corrections=corrections,
+        semantic_graph=semantic_graph,
     )
+
 
     # ── Export Adapters ───────────────────────────────────────────────────────
     formio_schema   = export_to_formio(canonical_doc)
@@ -359,6 +373,7 @@ async def get_debug_snapshot(run_id: str, stage: str):
         "topology":   "topology_evidence",
         "alignment":  "alignment_evidence",
         "fusion":     "resolved_fields",
+        "semantic_form_graph": "semantic_form_graph",
     }
 
     artifact_type = stage_map.get(stage)
@@ -491,5 +506,8 @@ async def get_debug_snapshot(run_id: str, stage: str):
              "alignment_edges": rf.resolved_provenance.alignment_edges}
             for rf in payload
         ]
+
+    elif artifact_type == "semantic_form_graph":
+        snapshot["semantic_form_graph"] = payload
 
     return snapshot

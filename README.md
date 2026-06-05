@@ -27,26 +27,38 @@ PDF Input
         IQR Geometry Engine (dynamic eps, zero hardcoded)
                 │
                 ▼
-        DBSCAN Layout Cells (sorted: page, y1, x1)
+        DBSCAN Layout Cells & SmartZone Discovery
                 │
                 ▼
-        FormField[] (normalized bbox 0–1, RTL Arabic)
+        Structural Semantic Compiler (FormGraph generation)
+                │
+                ▼
+        Form Understanding Layer (Phase 2):
+          ├─ GridTableStructureBuilder (spatial table resolver)
+          ├─ QuestionControlBinder (checkbox option binding)
+          └─ SemanticFormGraphBuilder (sections & fields assembler)
+                │
+                ▼
+        SemanticFormGraph (Single Source of Truth)
+                │
+                ▼
+        Schema Builder (Canonical Document / Form.io / ERPNext export)
                 │
           ┌─────┴──────┐
           ▼            ▼
-      QA Canvas    Form.io JSON
-      (HTML5)      /api/cfis/v1/export/formio/{id}
+      QA Canvas    Form.io / ERPNext JSON
+      (HTML5)      /api/cfis/v3/pipeline/export/{run_id}
 ```
 
 ```
-FastAPI  =  العقل (Business Logic · CFIS Pipeline · Governance)
+FastAPI  =  العقل (Business Logic · CFIS Pipeline · Semantic Form Graph)
 
-React    =  برج التحكم (Admin · QA Canvas · Monitoring)
+React    =  برج التحكم (Evidence Workbench · QA Canvas · Monitoring)
 pgvector =  الذاكرة (RAG · Semantic Search)
-Canonical Schema v2 = الدستور (Single Source of Truth)
+SemanticFormGraph = الدستور (Single Source of Truth for form extraction)
 ```
 
-> **القاعدة غير القابلة للتفاوض:** FastAPI هو مصدر الحقيقة الوحيد.
+> **القاعدة غير القابلة للتفاوض:** FastAPI هو مصدر الحقيقة الوحيد. الحركات التفاعلية للفرونت اند (HITL) لا تعدل البيانات مباشرة، بل ترسل عمليات تصحيح دلالية وتطلب إعادة تشغيل الـ pipeline.
 
 ---
 
@@ -89,14 +101,24 @@ emthethal-ai/
 │       │   ├── orm.py            ← SQLAlchemy ORM (legacy, unchanged)
 │       │   └── schemas.py        ← CFIS Canonical Schema v2 (ONE source)
 │       │
+│       ├── core/
+│       │   └── forms/            ← Form Understanding Engine (Phase 2)
+│       │       ├── models.py     ← Semantic models: SemanticFormGraph, SemanticSection, SemanticField
+│       │       ├── compiler.py   ← Zone classification & FormGraph compilation
+│       │       ├── grid_table_structure_builder.py ← spatial table grid resolver
+│       │       ├── question_control_binder.py      ← checkbox and radio option binder
+│       │       └── semantic_form_graph_builder.py  ← final graph synthesizer
+│       │
 │       ├── services/
 │       │   ├── hybrid_extraction.py  ← native-first + OCR fallback (R16)
 │       │   ├── geometry.py           ← IQR geometry, DBSCAN, RTL columns
 │       │   ├── ocr.py                ← process_pdf() — single entry point
-│       │   └── ...                   ← CFIS core services
+│       │   ├── topology/             ← stage.py (TopologyStage)
+│       │   ├── alignment/            ← alignment edge discovery
+│       │   └── fusion/               ← fusion_engine.py (ResolvedField builder)
 │       │
 │       └── api/
-│           ├── router.py         ← CFIS API /api/cfis/v1/ (9 routes)
+│           ├── router.py         ← CFIS API router
 │           └── routes/           ← CFIS core routes (geometry_debug.py, pipeline.py, hitl.py)
 │
 └── frontend/
@@ -107,6 +129,9 @@ emthethal-ai/
         │   ├── QAViewer.jsx      ← HTML5 Canvas QA + SpatialIndex
         │   └── FormBuilderWrapper.jsx ← Form.io builder wrapper
         ├── workbench/            ← Phase 3 Evidence Workbench
+        │   ├── EvidenceWorkbench.jsx ← main workbench layout
+        │   ├── panels/           ← TopBar, LeftPanel, DocumentViewer, RightPanel, BottomPanel
+        │   └── store/            ← workbenchStore.js (Zustand client-side state)
         └── index.css             ← design system tokens
 ```
 

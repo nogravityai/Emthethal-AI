@@ -6,6 +6,67 @@ from app.services.pipeline.pipeline_models import generate_stable_id
 
 logger = logging.getLogger(__name__)
 
+# ── Table candidate scoring ────────────────────────────────────────────────────
+# Hard-exclude unambiguous structural containers that can never be table cells.
+_HARD_EXCLUDE_TYPES = frozenset({
+    "section_header", "form_title", "footer",
+    "signature_block", "signature_area"
+})
+_TABLE_SCORE_THRESHOLD = 0.5
+
+
+def _table_candidate_score(region, all_regions,
+                           col_tol: float = 12.0,
+                           row_tol: float = 10.0) -> float:
+    """
+    Score a region's likelihood of belonging to a table grid.
+    Checks row alignment, column alignment, and spacing regularity
+    against neighbouring regions.
+
+    Returns a float in [0.0, 1.0].
+    Hard-excludes structural containers (section headers, footers, etc.).
+    """
+    if getattr(region, 'region_type', None) in _HARD_EXCLUDE_TYPES:
+        return 0.0
+
+    cx = (region.bbox.x1 + region.bbox.x2) / 2.0
+    cy = (region.bbox.y1 + region.bbox.y2) / 2.0
+
+    row_peers = [
+        r for r in all_regions
+        if r is not region
+        and abs((r.bbox.y1 + r.bbox.y2) / 2.0 - cy) <= row_tol
+    ]
+    col_peers = [
+        r for r in all_regions
+        if r is not region
+        and abs((r.bbox.x1 + r.bbox.x2) / 2.0 - cx) <= col_tol
+    ]
+
+    def _spacing_regularity(centroids):
+        if len(centroids) < 2:
+            return 0.4
+        gaps = [centroids[i+1] - centroids[i] for i in range(len(centroids)-1)]
+        mean_gap = sum(gaps) / len(gaps)
+        if mean_gap <= 0:
+            return 0.0
+        variance = sum((g - mean_gap) ** 2 for g in gaps) / len(gaps)
+        return 1.0 if variance / mean_gap < 0.3 else 0.4
+
+    row_score = 0.0
+    if row_peers:
+        xs = sorted((r.bbox.x1 + r.bbox.x2) / 2.0 for r in row_peers)
+        row_score = _spacing_regularity(xs)
+
+    col_score = 0.0
+    if col_peers:
+        ys = sorted((r.bbox.y1 + r.bbox.y2) / 2.0 for r in col_peers)
+        col_score = _spacing_regularity(ys)
+
+    has_peers = 1.0 if (row_peers or col_peers) else 0.0
+    return 0.4 * has_peers + 0.3 * row_score + 0.3 * col_score
+
+
 class TableTopologyResolver:
     """
     Resolves layout cell boxes and detected lines into a logical grid topology.
@@ -25,7 +86,12 @@ class TableTopologyResolver:
         page_height: int
     ) -> List[TableTopologyEvidence]:
         # Only process regions/boxes where region_type is "table", "table_cell", "input_box", or "unknown"
-        table_boxes = [b for b in boxes if getattr(b, "region_type", None) in ("table", "table_cell", "input_box", "unknown")]
+        # [REVISED] Score-based candidate selection replaces the old whitelist.
+        # Hard-excludes structural containers; uses alignment/spacing regularity score.
+        table_boxes = [
+            b for b in boxes
+            if _table_candidate_score(b, boxes) > _TABLE_SCORE_THRESHOLD
+        ]
         if not table_boxes:
             return []
 

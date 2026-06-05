@@ -101,7 +101,7 @@ export const useWorkbenchStore = create(
     //   fusion:    { fields: [{id, field_type, confidence, ocr_tokens, alignment_edges}] }
     //   coordinate_space: { coordinate_space: {...} }
     //   shapes:    { shapes: [...] }
-    snapshots: { ocr: null, geometry: null, topology: null, alignment: null, fusion: null, coordinate_space: null, shapes: null },
+    snapshots: { ocr: null, geometry: null, topology: null, alignment: null, fusion: null, coordinate_space: null, shapes: null, semantic_form_graph: null },
 
     // ── Run history ───────────────────────────────────────────────────────────
     runs: [],           // Array of { run_id, timestamp, stages[], human_operations[], determinism_ok }
@@ -215,7 +215,7 @@ export const useWorkbenchStore = create(
       set(s => {
         s.runId = run_id;
         s.artifacts = artifacts ?? {};
-        s.snapshots = snapshots ?? { ocr: null, geometry: null, topology: null, alignment: null, fusion: null, coordinate_space: null, shapes: null };
+        s.snapshots = snapshots ?? { ocr: null, geometry: null, topology: null, alignment: null, fusion: null, coordinate_space: null, shapes: null, semantic_form_graph: null };
         s.timeline = timeline;
         s.schema = schema;
         s.determinismOk = determinism_ok;
@@ -318,8 +318,8 @@ export const useWorkbenchStore = create(
     resetWorkbench: () =>
       set(s => {
         s.runId = null; s.artifacts = {}; s.runs = []; s.activeRunIndex = 0;
-        s.snapshots = { ocr: null, geometry: null, topology: null, alignment: null, fusion: null, coordinate_space: null, shapes: null };
-        s.compareSnapshots = { ocr: null, geometry: null, topology: null, alignment: null, fusion: null, coordinate_space: null, shapes: null };
+        s.snapshots = { ocr: null, geometry: null, topology: null, alignment: null, fusion: null, coordinate_space: null, shapes: null, semantic_form_graph: null };
+        s.compareSnapshots = { ocr: null, geometry: null, topology: null, alignment: null, fusion: null, coordinate_space: null, shapes: null, semantic_form_graph: null };
         s.timeline = null; s.schema = null; s.selected = null;
         s.loading = false; s.status = ''; s.compareMode = false; s.compareRunId = null;
         s.layers = { ...defaultLayers };

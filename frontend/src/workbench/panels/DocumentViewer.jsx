@@ -746,6 +746,8 @@ export default function DocumentViewer() {
           children: h.children_ids,
         }))) || [],
         form_graph: (layers.formGraph && snapshots.topology?.form_graph) || null,
+        semantic_form_graph: snapshots.semantic_form_graph?.semantic_form_graph || null,
+        resolved_fields: snapshots.fusion?.fields || [],
       };
 
       const blob = new Blob([JSON.stringify(compactSnapshot, null, 2)], { type: 'application/json' });

@@ -19,6 +19,20 @@ _EMAIL_RE  = re.compile(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}')
 _PHONE_RE  = re.compile(r'[\+]?[\d\s\-\(\)]{8,15}$')
 _NUM_RE    = re.compile(r'^\d+([.,]\d+)?$')
 
+# ── Arabic Normalization ───────────────────────────────────────────────────────
+def _normalize_arabic(text: str) -> str:
+    """
+    Normalize Arabic text for robust hint matching:
+    1. Remove diacritics and tatweel.
+    2. Normalize Alif forms (أ إ آ ٱ → ا).
+    3. Normalize Taa Marbuta (ة → ه).
+    """
+    text = re.sub(r'[\u064B-\u065F\u0670\u0640]', '', text)
+    text = re.sub(r'[أإآٱ]', 'ا', text)
+    text = text.replace('ة', 'ه')
+    return text
+
+
 # ── Keyword Sets ───────────────────────────────────────────────────────────────
 _CHECKBOX_CHARS = {'☑', '☐', '□', '✓', '✗'}
 _CHECKBOX_TEXTS = {'[x]', '[X]', '[v]', '[V]', '[ ]'}
@@ -30,6 +44,10 @@ _PHONE_HINTS   = {'هاتف', 'جوال', 'phone', 'mobile', 'tel', 'رقم ال
 _EMAIL_HINTS   = {'بريد', 'email', 'إيميل', 'ايميل'}
 _SIG_HINTS     = {'توقيع', 'signature', 'ختم', 'stamp', 'الإمضاء'}
 _DROPDOWN_HINTS = {'اختر', 'select', 'choose', 'قائمة', 'dropdown'}
+
+# Numeric field label hints (pre-normalized for fast matching)
+_NUM_HINTS_RAW = {'عمر', 'عدد', 'رقم', 'سن', 'العمر', 'عمره', 'عمرها'}
+_NUM_HINTS = {_normalize_arabic(h) for h in _NUM_HINTS_RAW}
 
 
 def classify_field_type(
@@ -52,6 +70,8 @@ def classify_field_type(
     t_lower = t.lower()
     label = (nearby_label or "").strip().lower()
     combined = f"{t_lower} {label}"
+    # Normalize Arabic for hint matching
+    normalized_label = _normalize_arabic(label)
 
     # ── 1. Checkbox — highest priority (visual indicators) ───────────────────
     if any(ch in t for ch in _CHECKBOX_CHARS):
@@ -97,6 +117,10 @@ def classify_field_type(
     if t and _NUM_RE.match(t):
         return FieldType.NUMBER
 
+    # ── 9b. Number inferred from label when field is empty ──────────────────
+    if not t and any(hint in normalized_label for hint in _NUM_HINTS):
+        return FieldType.NUMBER
+
     # ── 10. Propagate primitive_type hint from topology ──────────────────────
     if primitive_type:
         pl = primitive_type.lower()
@@ -112,7 +136,8 @@ def classify_field_type(
 def extract_nearby_label(
     ocr_tokens: List,
     field_bbox: list,
-    max_y_gap: int = 20,
+    max_y_gap: int = 35,
+    max_above: int = 80,
 ) -> str:
     """
     Find the closest OCR label token to a field bbox.
@@ -139,7 +164,19 @@ def extract_nearby_label(
         ) if hasattr(tok.bbox, 'x1') else tok.bbox
 
         t_cy = (by1 + by2) / 2
-        if abs(t_cy - f_cy) > max_y_gap:
+        tok_text = tok.text if hasattr(tok, 'text') else ""
+
+        if abs(t_cy - f_cy) <= max_y_gap:
+            # Same-row candidate — handled below in the existing logic
+            pass
+        elif fy1 >= by2 and (fy1 - by2) <= max_above:
+            # Column-header: label is directly above the field with horizontal overlap
+            h_overlap = max(0, min(fx2, bx2) - max(fx1, bx1))
+            if h_overlap > 0:
+                dist = fy1 - by2
+                candidates.append((dist + 1000, tok_text))  # lower priority than same-row
+            continue
+        else:
             continue
 
         # Prefer tokens to the RIGHT (Arabic label convention)

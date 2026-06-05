@@ -146,25 +146,112 @@ def _build_canonical_field(
 
 # ── Main Builder ───────────────────────────────────────────────────────────────
 
+def _build_from_semantic_graph(
+    document_id: str,
+    title: str,
+    semantic_graph: Any,
+    resolved_fields: List[ResolvedField],
+    field_type_corrections: Optional[Dict[str, Any]] = None,
+) -> CanonicalDocument:
+    """Helper to build CanonicalDocument directly from SemanticFormGraph."""
+    rf_map = {rf.field_id: rf for rf in resolved_fields}
+    sections: List[CanonicalSection] = []
+
+    def _build_field(sf: Any) -> CanonicalField:
+        rf = rf_map.get(sf.field_id)
+        value = rf.value if rf else None
+        confidence = rf.confidence_breakdown.final_score if (rf and hasattr(rf, "confidence_breakdown")) else 1.0
+
+        field_name = sf.label
+        field_type_str = sf.field_type
+
+        if field_type_corrections and sf.field_id in field_type_corrections:
+            corr = field_type_corrections[sf.field_id]
+            corr_type = corr.get("corrected_type") or corr.get("type")
+            corr_label = corr.get("corrected_label") or corr.get("label")
+            if corr_type:
+                field_type_str = corr_type
+            if corr_label:
+                field_name = corr_label
+
+        bbox_list = [sf.bbox.x_min, sf.bbox.y_min, sf.bbox.x_max, sf.bbox.y_max] if sf.bbox else None
+
+        if field_type_str == FieldType.CHECKBOX or field_type_str == "checkbox":
+            val_str = str(value or "").strip().lower()
+            is_checked = val_str in {"[x]", "[v]", "true", "checked", "yes", "☑", "✓"}
+            return CanonicalCheckbox(
+                field_id=sf.field_id,
+                field_name=field_name,
+                value=is_checked,
+                confidence_score=confidence,
+                provenance_ref=sf.field_id,
+                bbox=bbox_list,
+                zone_id=sf.section_id,
+                include_in_form=True,
+            )
+
+        return CanonicalField(
+            field_id=sf.field_id,
+            field_name=field_name,
+            value=value,
+            confidence_score=confidence,
+            field_type=field_type_str,
+            provenance_ref=sf.field_id,
+            bbox=bbox_list,
+            zone_id=sf.section_id,
+            include_in_form=True,
+        )
+
+    for sec in semantic_graph.sections:
+        zone_fields = []
+        include = getattr(sec, "include_in_form", True)
+        for sf in sec.fields:
+            cf = _build_field(sf)
+            cf.include_in_form = include
+            zone_fields.append(cf)
+
+        sections.append(CanonicalSection(
+            section_id=sec.section_id,
+            title=sec.label,
+            zone_type=getattr(sec, "zone_type", "unknown"),
+            include_in_form=include,
+            fields=zone_fields,
+        ))
+
+    if semantic_graph.unassigned_fields:
+        unzoned_fields = []
+        for sf in semantic_graph.unassigned_fields:
+            cf = _build_field(sf)
+            unzoned_fields.append(cf)
+
+        sections.append(CanonicalSection(
+            section_id="unzoned_" + str(uuid.uuid4())[:8],
+            title="Unclassified Fields",
+            zone_type="unknown",
+            include_in_form=True,
+            fields=unzoned_fields,
+        ))
+
+    page = CanonicalPage(page_number=1, sections=sections)
+    return CanonicalDocument(
+        document_id=document_id,
+        title=title,
+        pages=[page],
+    )
+
+
 def build_canonical_document(
     document_id: str,
     resolved_fields: List[ResolvedField],
     zones: Optional[List] = None,
     ocr_tokens: Optional[List] = None,
     field_type_corrections: Optional[Dict[str, Any]] = None,
+    semantic_graph: Optional[Any] = None,
 ) -> CanonicalDocument:
     """
     Groups ResolvedFields into a zone-aware CanonicalDocument.
-
-    Args:
-        document_id:     Unique document identifier.
-        resolved_fields: List of ResolvedField from FusionStage.
-        zones:           List of zone dicts/objects from TopologyStage.
-        ocr_tokens:      List of OCR token objects for label extraction.
-        field_type_corrections: Dict of human type/label corrections.
-
-    Returns:
-        CanonicalDocument structured by zones.
+    If semantic_graph is provided, builds directly using the SemanticFormGraph.
+    Otherwise, falls back to raw-region logic (deprecated).
     """
     ocr_tokens = ocr_tokens or []
     zones = zones or []
@@ -177,6 +264,23 @@ def build_canonical_document(
             if candidate:
                 title = candidate
             break
+
+    # If semantic graph is available, use it as primary path
+    if semantic_graph is not None:
+        return _build_from_semantic_graph(
+            document_id=document_id,
+            title=title,
+            semantic_graph=semantic_graph,
+            resolved_fields=resolved_fields,
+            field_type_corrections=field_type_corrections,
+        )
+
+    logger.warning(
+        "build_canonical_document: semantic_graph is unavailable. "
+        "Falling back to legacy raw-region path. "
+        "This fallback is DEPRECATED and must be removed post-Phase-2 stabilization."
+    )
+
 
     # ── 2. Build sections from zones ─────────────────────────────────────────
     if zones:
